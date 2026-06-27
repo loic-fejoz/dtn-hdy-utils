@@ -8,6 +8,8 @@ A collection of utility tools to interact with the `hardy` BPA implementation of
 - [**`dtnsend`**](src/bin/dtnsend.rs): Sends bundle payloads to a specified receiver EID via gRPC, matching `dtn7` command-line flags and supporting dry-run hex generation.
 - [**`dtnquery`**](src/bin/dtnquery.rs): Directly queries local metadata databases (SQLite/PostgreSQL , until `hardy` is providing such query/management interfaces) to inspect the node's bundle store state offline, matching the subcommand and stats formatting of the `dtn7-rs` `dtnquery` tool.
 - [**`dtntrigger`**](src/bin/dtntrigger.rs): Subscribes to a specific DTN service endpoint and either prints incoming payloads directly or executes a shell command with the payload written to a temporary file, matching the behavior of the `dtn7-rs` `dtntrigger` utility.
+- [**`dtnping`**](src/bin/dtnping.rs): Connects to a running local Hardy instance, registers as an application, sends ping bundles to a destination EID, and measures round-trip times (RTT) and path hops.
+  *(Difference from Hardy's built-in `bp ping`: Hardy's built-in utility runs an entire standalone BPA daemon inline and establishes a direct Convergence Layer connection (e.g. TCPCLv4) to the destination. Conversely, `dtnping` registers purely as a lightweight application layer client on a local running Hardy daemon over gRPC, sending bundles through it).*
 
 Refer to [AGENTS.md](AGENTS.md) for build, testing, and formatting guidelines.
 
@@ -39,3 +41,6 @@ Below is a prioritized list of potential utility tools to implement as DTN appli
   - *Data format*: JSON-LD ActivityPub activities (`application/activity+json`).
 - [ ] **`dtndiscord` / `dtnslack`**: A bot connector that acts as a gateway to queue system alerts or textual notifications locally, posting them directly to webhooks when online.
   - *Data format*: `application/json` matching the specific Discord or Slack webhook payload schemas.
+- [ ] **`dtnbpq` (Bundle Protocol Query)**: A content-centric DTN caching and discovery tool. It implements a query/response mechanism (based on `draft-irtf-dtnrg-bpq-00`) allowing nodes to query intermediate caches for specific resources or files, enabling in-network caching and local resource resolution without contacting the origin server directly.
+  - *Data format*: Structured query and response envelopes encoded as `application/json` or CBOR-based binary schemas.
+

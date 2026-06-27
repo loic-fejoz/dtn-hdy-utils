@@ -7,7 +7,7 @@ Both utilities communicate with the local `hardy` BPA instance using the gRPC se
 
 ```mermaid
 graph TD
-    ClientApp["dtnprint / dtnsend / dtntrigger"] -->|gRPC Client Wrapper| RemoteBpa[RemoteBpa]
+    ClientApp["dtnprint / dtnsend / dtntrigger / dtnping"] -->|gRPC Client Wrapper| RemoteBpa[RemoteBpa]
     RemoteBpa -->|gRPC over HTTP/2| HardyBPA[Hardy BPA Daemon]
 ```
 
@@ -34,3 +34,9 @@ graph TD
 - Listens to incoming bundle payloads:
   - If `--print` is enabled, formats the incoming payload inline to stdout.
   - Otherwise, writes the payload bytes safely to a named temporary file (`tempfile::NamedTempFile`) and spawns a background command, passing `<source_eid>` and `<temp_file_path>` as parameters, cleaning up the temp file automatically upon process exit. For details, see [dtntrigger.rs](../src/bin/dtntrigger.rs).
+
+### 5. The Ping Utility (`dtnping`)
+- Connects as a client to the running local Hardy BPA instance via gRPC using `RemoteBpa`.
+- Registers itself as an application using `register_application` (dynamically generating a client-side ephemeral service EID like `dtnping-<pid>` if no custom source EID is specified via `-S`).
+- Encodes ping payloads as `[sequence, options_map]` arrays in CBOR, requesting all status reports using `SendOptions`.
+- Tracks RTTs locally and prints progress and final statistics. Status reports are parsed to show routing path transitions in real time. For details, see [dtnping.rs](../src/bin/dtnping.rs).
