@@ -1,0 +1,26 @@
+[package]
+name = "dtn-hdy-utils"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+hardy-bpa = { version = "0.1.0", features = ["serde", "tokio"] }
+hardy-proto = "0.1"
+hardy-bpv7 = { version = "0.5.0", features = ["std", "serde"] }
+tokio = { version = "1.52.3", features = ["full"] }
+anyhow = "1.0.102"
+time = "0.3.49"
+bytes = "1.11.1"
+rusqlite = { version = "0.40", features = ["array", "bundled", "time"] }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "macros", "time"] }
+config = { version = "0.15", features = ["yaml", "toml", "json"] }
+sha1 = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+directories = "5"
+tempfile = "3"
+
+[patch.crates-io]
+sqlx-sqlite = { path = "../hardy/patches/sqlx-sqlite" }
+

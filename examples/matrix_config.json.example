@@ -1,0 +1,9 @@
+{
+  "homeserver": "https://matrix.org",
+  "user_id": "@your_user:matrix.org",
+  "device_id": "ABCDEFGHIJ",
+  "access_token": "syt_your_stored_access_token_goes_here...",
+  "password": "your_password_here_for_automatic_token_renewal",
+  "room_id": "!your_room_id:matrix.org",
+  "store_path": "./examples/matrix_store"
+}
