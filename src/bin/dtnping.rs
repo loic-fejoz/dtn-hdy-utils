@@ -46,9 +46,9 @@ struct Args {
     #[arg(short = 'w', long)]
     timeout: Option<String>,
 
-    /// Time to wait for responses after last ping (e.g. '1s')
-    #[arg(short = 'W', long)]
-    wait: Option<String>,
+    /// Time to wait for responses after last ping (e.g. '10s')
+    #[arg(short = 'W', long, default_value = "10s")]
+    wait: String,
 
     /// Only show summary statistics
     #[arg(short, long)]
@@ -440,10 +440,10 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let wait_time = match args.wait.as_deref().map(parse_duration).transpose() {
-        Ok(w) => w.unwrap_or(interval),
+    let wait_time = match parse_duration(&args.wait) {
+        Ok(w) => w,
         Err(e) => {
-            eprintln!("Invalid wait time '{:?}': {}", args.wait, e);
+            eprintln!("Invalid wait time '{}': {}", args.wait, e);
             std::process::exit(2);
         }
     };
@@ -507,9 +507,9 @@ async fn main() -> anyhow::Result<()> {
     } else {
         let wait_secs = wait_time.as_secs();
         if let Some(count) = args.count {
-            interval.as_secs().saturating_mul(count as u64) + wait_secs
+            (interval.as_secs().saturating_mul(count as u64) + wait_secs).max(30)
         } else {
-            session_timeout.map(|t| t.as_secs()).unwrap_or(300)
+            session_timeout.map(|t| t.as_secs()).unwrap_or(300).max(30)
         }
     };
     let lifetime = std::time::Duration::from_secs(lifetime_secs);
