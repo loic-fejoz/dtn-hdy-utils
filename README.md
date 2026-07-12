@@ -10,16 +10,16 @@ A collection of utility tools to interact with the `hardy` BPA implementation of
 - [**`dtntrigger`**](src/bin/dtntrigger.rs): Subscribes to a specific DTN service endpoint and either prints incoming payloads directly or executes a shell command with the payload written to a temporary file, matching the behavior of the `dtn7-rs` `dtntrigger` utility.
 - [**`dtnping`**](src/bin/dtnping.rs): Connects to a running local Hardy instance, registers as an application, sends ping bundles to a destination EID, and measures round-trip times (RTT) and path hops.
   *(Difference from Hardy's built-in `bp ping`: Hardy's built-in utility runs an entire standalone BPA daemon inline and establishes a direct Convergence Layer connection (e.g. TCPCLv4) to the destination. Conversely, `dtnping` registers purely as a lightweight application layer client on a local running Hardy daemon over gRPC, sending bundles through it).*
-
-Refer to [AGENTS.md](AGENTS.md) for build, testing, and formatting guidelines.
+- [**`hdy-stats`**](src/bin/hdy-stats.rs): Connects to the local Hardy BPA via gRPC, monitors the BPA's log output (either through a log file or systemd journald), records incoming/outgoing bundle traffic in a local SQLite database, and acts as a DTN service responder to answer statistics queries with formatted text reports.
 
 See [examples](examples/README.md) for usage examples.
+
+Refer to [AGENTS.md](AGENTS.md) for build, testing, and formatting guidelines.
 
 ## Ideas
 
 Below is a prioritized list of potential utility tools to implement as DTN applications for this project, including data format (MIME type) details and ham radio integrations:
 
-- [x] **`dtntrigger`**: A utility that listens to a specific service endpoint and executes a user-defined shell command or script upon receiving a new bundle payload.
   - *Data format*: Typically `text/plain` (raw commands/scripts) or `application/json` (structured parameters).
 - [ ] **`dtnaprs` (APRS Gateway)**: A bridge that parses local AX.25 APRS (Automatic Packet Reporting System) packets (telemetry, weather, positions) from a radio TNC and forwards them.
   - *Data format*: `text/plain` containing standard APRS text string representations, or `application/vnd.aprs` for structured APRS packets.
@@ -43,4 +43,3 @@ Below is a prioritized list of potential utility tools to implement as DTN appli
   - *Data format*: `application/json` matching the specific Discord or Slack webhook payload schemas.
 - [ ] **`dtnbpq` (Bundle Protocol Query)**: A content-centric DTN caching and discovery tool. It implements a query/response mechanism (based on `draft-irtf-dtnrg-bpq-00`) allowing nodes to query intermediate caches for specific resources or files, enabling in-network caching and local resource resolution without contacting the origin server directly.
   - *Data format*: Structured query and response envelopes encoded as `application/json` or CBOR-based binary schemas.
-

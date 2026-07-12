@@ -64,3 +64,55 @@ The `dtn-matrix.py` script is a helper for `dtntrigger` that forwards received b
    ```
 
 *Note: For E2EE rooms, the script automatically initializes a local keys database store (`matrix_store`), syncs room member keys, and uses `ignore_unverified_devices=True` to route encrypted alerts seamlessly.*
+
+## DTN Traffic Statistics Service (`hdy-stats`)
+
+The `hdy-stats` utility records traffic volume (the number of unique bundles routed) and processes real-time stats queries over the DTN network.
+
+### How to use:
+
+1. **Query stats remotely over the DTN network**:
+   You can query the stats service of any node on the network where the app is installed.
+   
+   a. Start the `dtnprint` listener on your local node to capture the response on a dedicated endpoint (e.g. `myreply`):
+      ```bash
+      cargo run --release --bin dtnprint -- --service myreply
+      ```
+
+   b. Send an empty bundle to the stats service of the target node (e.g. `dtn://f4jxq/stats`) setting the sender to your reply endpoint:
+      ```bash
+      cargo run --release --bin dtnsend -- --sender myreply --receiver dtn://f4jxq/stats ""
+      ```
+
+   c. The listener will print the stats report sent back by the stats service:
+      ```text
+      From: dtn://f4jxq/stats
+      --- 24h ---
+      dtn://f4jxq/: 35 bundle(s)
+      dtn://f4jxq/echo: 7 bundle(s)
+      dtn://f4jxq-2/myreply: 3 bundle(s)
+      ```
+
+### How to test locally:
+
+1. **Start the service in the background** (monitors the BPA logs and listens on `dtn://<node>/stats`):
+
+   *Using journalctl (requires the user to belong to the `systemd-journal` group):*
+   ```bash
+   cargo run --release --bin hdy-stats -- --journald-unit hardy-bpa -v
+   ```
+
+   *Using a dedicated log file:*
+   ```bash
+   cargo run --release --bin hdy-stats -- --log-file /var/log/hardy/hardy.log -v
+   ```
+
+2. **Generate some test traffic** (e.g. by pinging or sending messages):
+   ```bash
+   cargo run --release --bin dtnping -- dtn://f4jxq/echo -c 2
+   ```
+
+3. **Query stats locally** (prints a formatted text report of the traffic ranking from the SQLite database):
+   ```bash
+   cargo run --release --bin hdy-stats -- --show
+   ```
