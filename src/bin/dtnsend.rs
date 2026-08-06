@@ -46,6 +46,18 @@ struct Args {
     /// Bundle lifetime in seconds (default = 3600)
     #[clap(short, long, default_value_t = 3600)]
     lifetime: u64,
+
+    /// Inline key material for bundle signing (string or hex)
+    #[clap(long = "sign-key")]
+    sign_key: Option<String>,
+
+    /// Path to file containing key material for bundle signing
+    #[clap(long = "sign-key-file")]
+    sign_key_file: Option<String>,
+
+    /// Security Source EID for BPSec BIB (defaults to bundle source EID)
+    #[clap(long = "security-source")]
+    security_source: Option<String>,
 }
 
 struct SenderCla {
@@ -128,6 +140,9 @@ async fn main() -> anyhow::Result<()> {
             .build(CreationTimestamp::now())
             .expect("failed to build bundle");
 
+        // Perform signing if requested
+        let (bundle, binbundle) = maybe_sign_bundle(bundle, binbundle.into_vec(), &args)?;
+
         println!("Bundle-Id: {}", bundle.id.to_key());
         let hexstr: String = binbundle.iter().map(|b| format!("{:02x}", b)).collect();
         println!("{}", hexstr);
@@ -200,6 +215,9 @@ async fn main() -> anyhow::Result<()> {
             .build(CreationTimestamp::now())
             .expect("failed to build bundle");
 
+        // Perform signing if requested
+        let (bundle, binbundle) = maybe_sign_bundle(bundle, binbundle.into_vec(), &args)?;
+
         // Get the sink and send the payload
         if let Some(sink) = sender_cla.sink.get() {
             sink.dispatch(Bytes::from(binbundle), None, None)
@@ -226,4 +244,34 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn maybe_sign_bundle(
+    bundle: hardy_bpv7::bundle::Bundle,
+    binbundle: Vec<u8>,
+    args: &Args,
+) -> anyhow::Result<(hardy_bpv7::bundle::Bundle, Vec<u8>)> {
+    if args.sign_key.is_some() || args.sign_key_file.is_some() {
+        let key_mat = dtn_hdy_utils::security::load_key(
+            args.sign_key.as_deref(),
+            args.sign_key_file.as_deref(),
+        )?;
+        let sec_source = if let Some(ref sec_str) = args.security_source {
+            Some(
+                sec_str
+                    .parse::<Eid>()
+                    .map_err(|e| anyhow::anyhow!("Invalid security source EID: {e}"))?,
+            )
+        } else {
+            None
+        };
+        if args.verbose {
+            eprintln!("Signing bundle with HMAC-SHA256...");
+        }
+        let (signed_bundle, signed_binbundle) =
+            dtn_hdy_utils::security::sign_bundle(&binbundle, &key_mat, sec_source)?;
+        Ok((signed_bundle, signed_binbundle))
+    } else {
+        Ok((bundle, binbundle))
+    }
 }

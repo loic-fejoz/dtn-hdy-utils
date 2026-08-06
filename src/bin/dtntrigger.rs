@@ -1,8 +1,9 @@
 use bytes::Bytes;
 use clap::Parser;
+use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
 use hardy_bpa::async_trait;
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::services::{Application, ApplicationSink, StatusNotify};
+use hardy_bpa::services::{Service as BpaService, ServiceSink};
 use hardy_bpv7::eid::{Eid, Service};
 use hardy_proto::client::RemoteBpa;
 use std::io::Write;
@@ -37,13 +38,31 @@ struct Args {
     /// Command to execute for incoming bundles, param1 = source, param2 = payload file
     #[arg(short, long, default_value = "echo")]
     command: String,
+
+    /// Path to keystore configuration file (defaults to ~/.config/dtn/keystore.toml)
+    #[arg(long = "keystore")]
+    keystore: Option<std::path::PathBuf>,
+
+    /// Inline verification key material (string or hex)
+    #[arg(long = "verify-key")]
+    verify_key: Option<String>,
+
+    /// Path to single verification key file
+    #[arg(long = "verify-key-file")]
+    verify_key_file: Option<String>,
+
+    /// Verification policy for received bundles (strict, warn, or ignore) (default = "warn")
+    #[arg(long = "verify-policy", default_value = "warn")]
+    verify_policy: VerifyPolicy,
 }
 
 struct TriggerApp {
-    sink: OnceCell<Box<dyn ApplicationSink>>,
+    sink: OnceCell<Box<dyn ServiceSink>>,
     verbose: bool,
     print: bool,
     command: String,
+    keystore: KeyStore,
+    policy: VerifyPolicy,
 }
 
 fn write_temp_file(data: &[u8], verbose: bool) -> anyhow::Result<NamedTempFile> {
@@ -91,11 +110,11 @@ fn execute_cmd(
 }
 
 #[async_trait]
-impl Application for TriggerApp {
-    async fn on_register(&self, source: &Eid, sink: Box<dyn ApplicationSink>) {
+impl BpaService for TriggerApp {
+    async fn on_register(&self, source: &Eid, sink: Box<dyn ServiceSink>) {
         if self.verbose {
             eprintln!(
-                "Trigger application registered successfully with EID: {}",
+                "Trigger service registered successfully with EID: {}",
                 source
             );
         }
@@ -104,17 +123,58 @@ impl Application for TriggerApp {
 
     async fn on_unregister(&self) {
         if self.verbose {
-            eprintln!("Trigger application unregistered");
+            eprintln!("Trigger service unregistered");
         }
     }
 
-    async fn on_receive(
-        &self,
-        source: Eid,
-        _expiry: time::OffsetDateTime,
-        _ack_requested: bool,
-        payload: Bytes,
-    ) {
+    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+        let (source, payload) =
+            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
+                Ok(parsed) => {
+                    let payload_bytes = parsed
+                        .bundle
+                        .blocks
+                        .get(&1)
+                        .and_then(|b| data.get(b.payload_range()))
+                        .map(|bytes| bytes.to_vec())
+                        .unwrap_or_else(|| data.to_vec());
+                    (parsed.bundle.id.source, payload_bytes)
+                }
+                Err(_) => (Eid::Null, data.to_vec()),
+            };
+
+        if self.policy != VerifyPolicy::Ignore {
+            let res = verify_bundle(&data, &self.keystore);
+            match res {
+                VerifyResult::Valid => {
+                    if self.verbose {
+                        eprintln!("Signature verified successfully for source {}", source);
+                    }
+                }
+                VerifyResult::Invalid(reason) => {
+                    eprintln!(
+                        "WARNING: Signature verification failed for {}: {}",
+                        source, reason
+                    );
+                    if self.policy == VerifyPolicy::Strict {
+                        eprintln!("Bundle dropped due to strict verification policy.");
+                        return;
+                    }
+                }
+                VerifyResult::Unsigned => {
+                    if self.policy == VerifyPolicy::Strict {
+                        eprintln!(
+                            "WARNING: Unsigned bundle received from {}. Dropped due to strict verification policy.",
+                            source
+                        );
+                        return;
+                    } else if self.verbose {
+                        eprintln!("Received unsigned bundle from {}", source);
+                    }
+                }
+            }
+        }
+
         if self.verbose {
             eprintln!("[<] Received bundle from {}", source);
         }
@@ -156,7 +216,7 @@ impl Application for TriggerApp {
         &self,
         _bundle_id: &hardy_bpv7::bundle::Id,
         _from: &Eid,
-        _kind: StatusNotify,
+        _kind: hardy_bpa::services::StatusNotify,
         _reason: hardy_bpv7::status_report::ReasonCode,
         _timestamp: Option<time::OffsetDateTime>,
     ) {
@@ -184,12 +244,23 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Connecting to Hardy BPA at {}", grpc_addr);
     }
 
+    let mut keystore = KeyStore::load_default_or(args.keystore.as_deref())?;
+
+    if args.verify_key.is_some() || args.verify_key_file.is_some() {
+        let key_mat = load_key(args.verify_key.as_deref(), args.verify_key_file.as_deref())?;
+        keystore.add_key("*", &key_mat.raw);
+    }
+
+    let policy = args.verify_policy;
+
     let remote_bpa = RemoteBpa::new(grpc_addr);
     let app = Arc::new(TriggerApp {
         sink: OnceCell::new(),
         verbose: args.verbose,
         print: args.print,
         command: args.command,
+        keystore,
+        policy,
     });
 
     let service_id = if let Ok(num) = args.endpoint.parse::<u32>() {
@@ -199,9 +270,9 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let registered_eid = remote_bpa
-        .register_application(service_id, app.clone())
+        .register_service(service_id, app.clone())
         .await
-        .map_err(|e| anyhow::anyhow!("Application registration failed: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Service registration failed: {e}"))?;
 
     eprintln!("Listening for trigger events on: {}", registered_eid);
 

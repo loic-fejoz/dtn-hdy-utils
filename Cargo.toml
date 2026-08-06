@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 clap = { version = "4.6.1", features = ["derive"] }
 hardy-bpa = { version = "0.1.0", features = ["serde", "tokio"] }
 hardy-proto = "0.1"
-hardy-bpv7 = { version = "0.5.0", features = ["std", "serde"] }
+hardy-bpv7 = { version = "0.5.0", features = ["std", "serde", "rfc9173"] }
 tokio = { version = "1.52.3", features = ["full"] }
 anyhow = "1.0.102"
 time = "0.3.49"
@@ -21,6 +21,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 directories = "5"
 tempfile = "3"
+hex = "0.4"
+base64 = "0.22"
+toml = "0.8"
 
 [patch.crates-io]
 sqlx-sqlite = { path = "../hardy/patches/sqlx-sqlite" }

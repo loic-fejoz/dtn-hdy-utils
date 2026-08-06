@@ -1,8 +1,11 @@
 use bytes::Bytes;
 use clap::Parser;
+use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
 use hardy_bpa::async_trait;
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::services::{Application, ApplicationSink, StatusNotify};
+use hardy_bpa::services::{Service as BpaService, ServiceSink, StatusNotify};
+use hardy_bpv7::builder::Builder;
+use hardy_bpv7::creation_timestamp::CreationTimestamp;
 use hardy_bpv7::eid::{Eid, Service};
 use hardy_proto::client::RemoteBpa;
 use std::collections::{HashMap, HashSet};
@@ -10,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::OnceCell;
 
 /// A Bundle Protocol 7 Ping Utility for Delay Tolerant Networking interacting with Hardy.
-/// Registers as an application on a local Hardy BPA instance via gRPC, sends ping
+/// Registers as a service on a local Hardy BPA instance via gRPC, sends ping
 /// bundles, and measures round-trip time.
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Send ping bundles and measure round-trip time", long_about = None)]
@@ -65,6 +68,34 @@ struct Args {
     /// Local endpoint/service to register (e.g. 'incoming', or '7'). If omitted, registers a dynamic endpoint.
     #[arg(short = 'S', long)]
     source: Option<String>,
+
+    /// Path to keystore configuration file (defaults to ~/.config/dtn/keystore.toml)
+    #[arg(long = "keystore")]
+    keystore: Option<std::path::PathBuf>,
+
+    /// Inline verification key material (string or hex)
+    #[arg(long = "verify-key")]
+    verify_key: Option<String>,
+
+    /// Path to single verification key file
+    #[arg(long = "verify-key-file")]
+    verify_key_file: Option<String>,
+
+    /// Verification policy for received bundles (strict, warn, or ignore) (default = "warn")
+    #[arg(long = "verify-policy", default_value = "warn")]
+    verify_policy: VerifyPolicy,
+
+    /// Inline key material for bundle signing (string or hex)
+    #[arg(long = "sign-key")]
+    sign_key: Option<String>,
+
+    /// Path to file containing key material for bundle signing
+    #[arg(long = "sign-key-file")]
+    sign_key_file: Option<String>,
+
+    /// Security Source EID for BPSec BIB (defaults to bundle source EID)
+    #[arg(long = "security-source")]
+    security_source: Option<String>,
 }
 
 struct PathHop {
@@ -87,13 +118,16 @@ struct PingState {
 }
 
 struct PingApp {
-    sink: OnceCell<Box<dyn ApplicationSink>>,
+    sink: OnceCell<Box<dyn ServiceSink>>,
     verbose: bool,
     quiet: bool,
     destination: Eid,
     local_node_id: OnceCell<String>,
+    local_eid: OnceCell<Eid>,
     state: Arc<Mutex<PingState>>,
     semaphore: Arc<tokio::sync::Semaphore>,
+    keystore: KeyStore,
+    policy: VerifyPolicy,
 }
 
 impl PingApp {
@@ -133,31 +167,70 @@ impl PingApp {
 }
 
 #[async_trait]
-impl Application for PingApp {
-    async fn on_register(&self, source: &Eid, sink: Box<dyn ApplicationSink>) {
+impl BpaService for PingApp {
+    async fn on_register(&self, source: &Eid, sink: Box<dyn ServiceSink>) {
         if self.verbose {
-            eprintln!(
-                "Ping application registered successfully with EID: {}",
-                source
-            );
+            eprintln!("Ping service registered successfully with EID: {}", source);
         }
+        let _ = self.local_eid.set(source.clone());
         let _ = self.sink.set(sink);
     }
 
     async fn on_unregister(&self) {
         if self.verbose {
-            eprintln!("Ping application unregistered");
+            eprintln!("Ping service unregistered");
         }
     }
 
-    async fn on_receive(
-        &self,
-        source: Eid,
-        _expiry: time::OffsetDateTime,
-        _ack_requested: bool,
-        payload: Bytes,
-    ) {
+    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
         let receive_time = std::time::Instant::now();
+
+        let (source, payload) =
+            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
+                Ok(parsed) => {
+                    let payload_bytes = parsed
+                        .bundle
+                        .blocks
+                        .get(&1)
+                        .and_then(|b| data.get(b.payload_range()))
+                        .map(|bytes| bytes.to_vec())
+                        .unwrap_or_else(|| data.to_vec());
+                    (parsed.bundle.id.source, payload_bytes)
+                }
+                Err(_) => (Eid::Null, data.to_vec()),
+            };
+
+        if self.policy != VerifyPolicy::Ignore {
+            let res = verify_bundle(&data, &self.keystore);
+            match res {
+                VerifyResult::Valid => {
+                    if self.verbose {
+                        eprintln!("Signature verified successfully for source {}", source);
+                    }
+                }
+                VerifyResult::Invalid(reason) => {
+                    eprintln!(
+                        "WARNING: Signature verification failed for {}: {}",
+                        source, reason
+                    );
+                    if self.policy == VerifyPolicy::Strict {
+                        eprintln!("Ping response dropped due to strict verification policy.");
+                        return;
+                    }
+                }
+                VerifyResult::Unsigned => {
+                    if self.policy == VerifyPolicy::Strict {
+                        eprintln!(
+                            "WARNING: Unsigned ping response received from {}. Dropped due to strict verification policy.",
+                            source
+                        );
+                        return;
+                    } else if self.verbose {
+                        eprintln!("Received unsigned ping response from {}", source);
+                    }
+                }
+            }
+        }
 
         if source != self.destination {
             if self.verbose {
@@ -463,17 +536,38 @@ async fn main() -> anyhow::Result<()> {
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(0));
 
+    let mut keystore = KeyStore::load_default_or(args.keystore.as_deref())?;
+
+    if args.verify_key.is_some() || args.verify_key_file.is_some() {
+        let key_mat = load_key(args.verify_key.as_deref(), args.verify_key_file.as_deref())?;
+        keystore.add_key("*", &key_mat.raw);
+    }
+
+    let key_mat_opt = if args.sign_key.is_some() || args.sign_key_file.is_some() {
+        Some(load_key(
+            args.sign_key.as_deref(),
+            args.sign_key_file.as_deref(),
+        )?)
+    } else {
+        None
+    };
+
+    let policy = args.verify_policy;
+
     let app = Arc::new(PingApp {
         sink: OnceCell::new(),
         verbose: args.verbose,
         quiet: args.quiet,
         destination: destination_eid.clone(),
         local_node_id: OnceCell::new(),
+        local_eid: OnceCell::new(),
         state: state.clone(),
         semaphore: semaphore.clone(),
+        keystore,
+        policy,
     });
 
-    // Register application (Hardy gRPC server requires a service_id)
+    // Register service (Hardy gRPC server requires a service_id)
     let service_id = if let Some(ref src) = args.source {
         if let Ok(num) = src.parse::<u32>() {
             Service::Ipn(num)
@@ -484,13 +578,10 @@ async fn main() -> anyhow::Result<()> {
         Service::Dtn(format!("dtnping-{}", std::process::id()).into())
     };
 
-    let registered_eid = match remote_bpa
-        .register_application(service_id, app.clone())
-        .await
-    {
+    let registered_eid = match remote_bpa.register_service(service_id, app.clone()).await {
         Ok(eid) => eid,
         Err(e) => {
-            eprintln!("Application registration failed: {}", e);
+            eprintln!("Service registration failed: {}", e);
             std::process::exit(2);
         }
     };
@@ -552,13 +643,40 @@ async fn main() -> anyhow::Result<()> {
                 let payload_bytes = encode_ping_payload(seq, padding);
                 let payload_len = payload_bytes.len();
 
-                let options = hardy_bpa::services::SendOptions {
+                let flags = hardy_bpv7::bundle::Flags {
                     report_status_time: true,
-                    notify_reception: true,
-                    notify_forwarding: true,
-                    notify_delivery: true,
-                    notify_deletion: true,
+                    receipt_report_requested: true,
+                    forward_report_requested: true,
+                    delivery_report_requested: true,
+                    delete_report_requested: true,
                     ..Default::default()
+                };
+
+                let source_eid = app.local_eid.get().expect("Local EID not set").clone();
+                let (bundle, binbundle) = Builder::new(source_eid, destination_eid.clone())
+                    .with_payload(payload_bytes.into())
+                    .with_lifetime(lifetime)
+                    .with_flags(flags)
+                    .build(CreationTimestamp::now())
+                    .expect("failed to build bundle");
+
+                // Perform signing if requested
+                let (_bundle, binbundle) = if let Some(ref key_mat) = key_mat_opt {
+                    let sec_source = if let Some(ref sec_str) = args.security_source {
+                        sec_str
+                            .parse::<Eid>()
+                            .map_err(|e| anyhow::anyhow!("Invalid security source EID: {e}"))?
+                    } else {
+                        bundle.id.source.clone()
+                    };
+                    if args.verbose {
+                        eprintln!("Signing ping bundle with HMAC-SHA256...");
+                    }
+                    let (signed_bundle, signed_binbundle) =
+                        dtn_hdy_utils::security::sign_bundle(&binbundle, key_mat, Some(sec_source))?;
+                    (signed_bundle, signed_binbundle)
+                } else {
+                    (bundle, binbundle.into_vec())
                 };
 
                 if !args.quiet {
@@ -566,7 +684,7 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 let send_time = std::time::Instant::now();
-                match sink.send(destination_eid.clone(), bytes::Bytes::from(payload_bytes), lifetime, Some(options)).await {
+                match sink.send(Bytes::from(binbundle)).await {
                     Ok(bundle_id) => {
                         let mut s = state.lock().unwrap();
                         s.sent += 1;
