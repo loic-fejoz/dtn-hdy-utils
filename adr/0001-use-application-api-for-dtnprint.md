@@ -1,7 +1,7 @@
 # ADR 1: Use of High-Level Application API for Bundle Receiver (`dtnprint`)
 
 ## Status
-Accepted
+Superseded by [ADR 7: BPSec Security Integration and Service API Migration](0007-bpsec-security-integration.md)
 
 ## Context
 We need to implement a receiver utility (`dtnprint`) that registers on a Hardy BPA endpoint, listens for incoming bundles, and prints their textual payloads to `stdout`.
@@ -10,8 +10,10 @@ The Hardy BPA framework offers two main interfaces for application/service integ
 1. **Application API**: Exposes a high-level trait `Application` where the BPA handles all bundle decoding, canonicalization, and validation. The application only receives the decoded payload (ADU) and metadata.
 2. **Service API**: Exposes a low-level trait `Service` where the application receives raw CBOR-encoded Bundle Protocol version 7 (BPv7) bundles and is responsible for parsing them.
 
-## Decision
+## Decision (Original)
 We chose the high-level **Application API** to implement `dtnprint`. It implements the `hardy_bpa::services::Application` trait to receive plain ADU payloads and log events.
+
+> **Note**: This decision was superseded. `dtnprint` was subsequently migrated to the low-level `BpaService` trait (`register_service`) to enable BPSec BIB signature verification on raw CBOR bundles. See [ADR 7](0007-bpsec-security-integration.md).
 
 ## Consequences
 - The implementation of `dtnprint` remains simple, lightweight, and focused purely on printing incoming payloads.

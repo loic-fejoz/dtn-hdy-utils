@@ -11,6 +11,27 @@ use std::io::{self, Read};
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
+/// Normalize a user-supplied EID string so the BPv7 parser accepts it.
+///
+/// The BPv7 `dtn`-scheme parser requires a `/` separating the node name from
+/// the (possibly empty) service name.  Users commonly omit the trailing slash
+/// when they only intend to address a node (e.g. `dtn://beacon` instead of
+/// `dtn://beacon/`).  This function detects that pattern and appends the
+/// missing `/` before the string is handed to the parser.
+fn normalize_eid(s: &str) -> String {
+    let s = s.trim();
+    // Only touch bare dtn:// URIs that have no slash after the authority.
+    // A valid dtn EID looks like: dtn://node-name/service
+    // A bare node EID looks like: dtn://node-name  (no trailing slash)
+    if let Some(rest) = s.strip_prefix("dtn://")
+        && !rest.is_empty()
+        && !rest.contains('/')
+    {
+        return format!("dtn://{}/", rest);
+    }
+    s.to_string()
+}
+
 /// A simple Bundle Protocol 7 Send Utility for Delay Tolerant Networking interacting with Hardy
 #[derive(Parser, Debug)]
 #[clap(version, author, long_about = None)]
@@ -113,18 +134,22 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Sending {} bytes.", buffer.len());
     }
 
-    let destination_eid = args.receiver.parse::<Eid>().expect("invalid receiver EID");
+    let destination_eid = normalize_eid(&args.receiver)
+        .parse::<Eid>()
+        .expect("invalid receiver EID");
 
     if args.dryrun {
         // Build the bundle locally using hardy_bpv7::builder::Builder
         // Determine the source EID for dryrun
         let source_eid = if let Some(ref sender_str) = args.sender {
-            sender_str.parse::<Eid>().unwrap_or_else(|_| Eid::Dtn {
-                node_name: DtnNodeId {
-                    node_name: "localhost".into(),
-                },
-                service_name: "".into(),
-            })
+            normalize_eid(sender_str)
+                .parse::<Eid>()
+                .unwrap_or_else(|_| Eid::Dtn {
+                    node_name: DtnNodeId {
+                        node_name: "localhost".into(),
+                    },
+                    service_name: "".into(),
+                })
         } else {
             Eid::Dtn {
                 node_name: DtnNodeId {
@@ -170,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Determine the source EID to build the bundle
         let source_eid = if let Some(ref sender_str) = args.sender {
-            if let Ok(eid) = sender_str.parse::<Eid>() {
+            if let Ok(eid) = normalize_eid(sender_str).parse::<Eid>() {
                 eid
             } else {
                 // If it is just a service number or name, resolve relative to local node EID
@@ -178,10 +203,10 @@ async fn main() -> anyhow::Result<()> {
                 match base_node {
                     Some(hardy_bpv7::eid::NodeId::Dtn(node_name)) => Eid::Dtn {
                         node_name: node_name.clone(),
-                        service_name: sender_str.clone().into_boxed_str(),
+                        service_name: sender_str.trim().to_string().into_boxed_str(),
                     },
                     Some(hardy_bpv7::eid::NodeId::Ipn(fqnn)) => {
-                        let service_number = sender_str.parse::<u32>().unwrap_or(0);
+                        let service_number = sender_str.trim().parse::<u32>().unwrap_or(0);
                         Eid::Ipn {
                             fqnn: fqnn.clone(),
                             service_number,
@@ -258,7 +283,7 @@ fn maybe_sign_bundle(
         )?;
         let sec_source = if let Some(ref sec_str) = args.security_source {
             Some(
-                sec_str
+                normalize_eid(sec_str)
                     .parse::<Eid>()
                     .map_err(|e| anyhow::anyhow!("Invalid security source EID: {e}"))?,
             )

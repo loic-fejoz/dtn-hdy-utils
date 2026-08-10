@@ -1,7 +1,7 @@
 # ADR 5: Design and Strategy for `dtntrigger` Utility
 
 ## Status
-Proposed
+Superseded by [ADR 7: BPSec Security Integration and Service API Migration](0007-bpsec-security-integration.md)
 
 ## Context
 We need to implement a bundle trigger utility named `dtntrigger` for the `dtn-hdy-utils` suite. This tool should mirror the behavior of the `dtn7-rs` `dtntrigger` utility:
@@ -15,6 +15,8 @@ We will implement the `dtntrigger` utility with the following architectural choi
 1. **Hardy BPA Connection and Registration**:
    - Use the `RemoteBpa::register_application` gRPC interface (similar to `dtnprint`) to dynamically register an application handler for the requested service.
    - We will parse the `--endpoint` argument as a `Service::Ipn` if it's a valid integer, and `Service::Dtn` otherwise.
+
+> **Note**: The registration approach was subsequently changed. `dtntrigger` was migrated to `RemoteBpa::register_service` (low-level `BpaService` trait) to receive raw CBOR bundles and support BPSec BIB signature verification before executing trigger commands. See [ADR 7](0007-bpsec-security-integration.md).
 
 2. **CLI Flags Parity**:
    - Provide the exact flags supported by `dtn7`'s `dtntrigger`:

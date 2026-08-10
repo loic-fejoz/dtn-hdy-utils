@@ -1,7 +1,7 @@
 # ADR 6: Design and Strategy for `dtnping` Utility
 
 ## Status
-Accepted
+Superseded by [ADR 7: BPSec Security Integration and Service API Migration](0007-bpsec-security-integration.md)
 
 ## Context
 We need to implement a Bundle Protocol 7 diagnostic and testing tool named `dtnping` for the `dtn-hdy-utils` suite. This tool should mirror the behavior of Hardy's built-in ping utility (from the `hardy` project `/home/loic/projets/hardy`), measuring round-trip time (RTT) and tracking network path hops via status reports.
@@ -14,6 +14,8 @@ We will implement the `dtnping` utility with the following architectural choices
    - Instead of embedding a local BPA daemon and registering CLAs, the tool connects to the local Hardy instance over gRPC using `RemoteBpa`.
    - It registers as a high-level application implementing the `Application` trait.
    - Because the Hardy gRPC proxy requires a `service_id` for registration (failing if none is provided), the tool generates an ephemeral service ID (e.g. `dtnping-<pid>`) when the user does not specify a custom source endpoint with `-S / --source`.
+
+> **Note**: The registration approach was subsequently changed. `dtnping` was migrated to the low-level `BpaService` trait (`register_service`) to enable raw CBOR bundle construction and dispatch, BPSec BIB signing of outgoing ping bundles, and signature verification of incoming pong replies. See [ADR 7](0007-bpsec-security-integration.md).
 
 2. **CBOR Ping Payload Structure**:
    - Embeds a sequence number and optional padding bytes in the payload to match the CBOR array structure `[sequence, options_map]` expected by Hardy's built-in echo service.
