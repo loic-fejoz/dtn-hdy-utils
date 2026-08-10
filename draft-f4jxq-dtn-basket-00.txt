@@ -1,0 +1,1064 @@
+
+
+
+
+Delay-Tolerant Networking                                          F4JXQ
+Internet-Draft                             Federation - Open Space Maker
+Intended status: Standards Track                          10 August 2026
+Expires: 11 February 2027
+
+
+                   DTN Basket Protocol Specification
+                       draft-f4jxq-dtn-basket-00
+
+Abstract
+
+   This document specifies the DTN Basket Protocol, a binary application
+   schema based on CBOR (RFC 8949) designed for the aggregation, multi-
+   requesting, and synchronous/asynchronous transfer of resources in
+   delay-tolerant networks (DTNs) utilizing the Bundle Protocol Version
+   7 (RFC 9171).  The protocol separates the control plane (structured
+   metadata and CoAP statuses) from the data plane (raw content
+   transmitted in distinct bundles).
+
+Status of This Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of BCP 78 and BCP 79.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current Internet-
+   Drafts is at https://datatracker.ietf.org/drafts/current/.
+
+   Internet-Drafts are draft documents valid for a maximum of six months
+   and may be updated, replaced, or obsoleted by other documents at any
+   time.  It is inappropriate to use Internet-Drafts as reference
+   material or to cite them other than as "work in progress."
+
+   This Internet-Draft will expire on 11 February 2027.
+
+Copyright Notice
+
+   Copyright (c) 2026 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+
+
+
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 1]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   This document is subject to BCP 78 and the IETF Trust's Legal
+   Provisions Relating to IETF Documents (https://trustee.ietf.org/
+   license-info) in effect on the date of publication of this document.
+   Please review these documents carefully, as they describe your rights
+   and restrictions with respect to this document.  Code Components
+   extracted from this document must include Revised BSD License text as
+   described in Section 4.e of the Trust Legal Provisions and are
+   provided without warranty as described in the Revised BSD License.
+
+Table of Contents
+
+   1.  Introduction  . . . . . . . . . . . . . . . . . . . . . . . .   2
+   2.  Terminology . . . . . . . . . . . . . . . . . . . . . . . . .   3
+   3.  Protocol Specification (CDDL) . . . . . . . . . . . . . . . .   3
+   4.  Detailed Method and Operation Semantics . . . . . . . . . . .   4
+     4.1.  GET (op=0) - Resource Retrieval . . . . . . . . . . . . .   4
+     4.2.  CHECK (op=1) - Metadata Verification  . . . . . . . . . .   5
+     4.3.  SEARCH (op=2) - Multi-Resource Discovery  . . . . . . . .   5
+     4.4.  CANCEL (op=3) - Pending Request Abort . . . . . . . . . .   6
+     4.5.  LIST (op=4) - Bibliographic Indexing  . . . . . . . . . .   6
+     4.6.  Payload-to-Metadata Correlation . . . . . . . . . . . . .   7
+   5.  Node Behavior and Execution Semantics . . . . . . . . . . . .   7
+     5.1.  Requester Operations  . . . . . . . . . . . . . . . . . .   7
+     5.2.  Forwarder and Intermediary Node Operations  . . . . . . .   7
+     5.3.  Responder Operations and Lifetime Mapping . . . . . . . .   8
+   6.  CoAP Status Codes Mapping . . . . . . . . . . . . . . . . . .   8
+   7.  Security Considerations . . . . . . . . . . . . . . . . . . .   8
+     7.1.  Amplification Attacks . . . . . . . . . . . . . . . . . .   9
+     7.2.  Content Correlation and Verification  . . . . . . . . . .   9
+   8.  IANA Considerations . . . . . . . . . . . . . . . . . . . . .   9
+   9.  References  . . . . . . . . . . . . . . . . . . . . . . . . .   9
+     9.1.  Normative References  . . . . . . . . . . . . . . . . . .   9
+   Appendix A.  Informative Examples and Sequence Traces . . . . . .  10
+     A.1.  Scenario 1: Multi-Item Priority Request (GET and
+           CHECK)  . . . . . . . . . . . . . . . . . . . . . . . . .  10
+     A.2.  Scenario 2: Bibliographic Index Request (LIST)  . . . . .  12
+     A.3.  Scenario 3: Delta Synchronization with Hashes (SEARCH)  .  14
+     A.4.  Scenario 4: Cancellation Trace (CANCEL) . . . . . . . . .  17
+   Author's Address  . . . . . . . . . . . . . . . . . . . . . . . .  19
+
+1.  Introduction
+
+   In disconnected or intermittent networks governed by the Bundle
+   Protocol v7 (BPv7, [RFC9171]), reducing network overhead is critical.
+   The DTN Basket Protocol allows the aggregation of multiple
+   heterogeneous requests (retrieval, verification, search,
+   cancellation, listing) within a single basket encoded in CBOR
+   ([RFC8949]).
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 2]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   To ensure data integrity under BPSec ([RFC9182]) while permitting
+   partial responses by intermediary nodes, the protocol separates
+   control and content:
+
+   *  A CBOR control bundle (basket-response) carrying only metadata and
+      application execution statuses.
+
+   *  Native BPv7 network bundles carrying the raw payloads of each
+      resource.
+
+2.  Terminology
+
+   The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+   "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and
+   "OPTIONAL" in this document are to be interpreted as described in BCP
+   14 [RFC2119] [RFC8174].
+
+3.  Protocol Specification (CDDL)
+
+   The exact syntactical structure of the request basket and the
+   response envelope is defined below in CDDL ([RFC8610]).
+
+   ; =====================================================================
+   ; DTN BASKET PROTOCOL GRAMMAR (RFC 8610)
+   ; =====================================================================
+
+   protocol-version = 1
+   coap-status-code = uint .size 1 ; CoAP status codes (RFC 7252)
+
+   ; ---------------------------------------------------------------------
+   ; 1. REQUEST BASKET (BASKET REQUEST)
+   ; ---------------------------------------------------------------------
+
+   basket-request = {
+     ? -1 => uint,            ; Experimentation tag (e.g., 44444)
+     0 => uint,               ; Protocol version (protocol-version = 1)
+     1 => text / bytes,       ; Unique identifier of the request (req_id)
+     ? 2 => text,             ; Optional reply destination (reply_to EID)
+     ? 3 => uint,             ; Default lifetime of response bundles (ms/s)
+     4 => [* request-item]    ; Array of items ordered by priority
+   }
+
+   request-item = {
+     0 => uint .default 0,    ; Operation: 0=GET, 1=CHECK, 2=SEARCH, 3=CANCEL, 4=LIST
+     1 => text,               ; URI / URN / CID / Tag
+     ? 2 => uint,             ; Maximum accepted size in octets (max_size)
+     ? 3 => [* (uint / text)],; Accepted formats (default = */*)
+     ? 4 => [* bytes],        ; Truncated hashes already owned (have_hashes)
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 3]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+     ? 5 => uint,             ; POSIX timestamp (if_modified_since)
+     ? 6 => uint              ; Lifetime override for the response of this item (ms/s)
+   }
+
+   ; ---------------------------------------------------------------------
+   ; 2. METADATA APPLICATION RESPONSE (BASKET RESPONSE)
+   ; ---------------------------------------------------------------------
+
+   basket-response = {
+     ? -1 => uint,            ; Experimentation tag (e.g., 44444)
+     0 => uint,               ; Protocol version (protocol-version = 1)
+     1 => text / bytes,       ; Original request identifier (req_id)
+     2 => [* item-response]   ; Array of results per item
+   }
+
+   item-response = {
+     0 => uint,               ; Item index in the original basket (item_idx). Note: Multiple item-responses may share the same item_idx (e.g. for SEARCH).
+     1 => coap-status-code,   ; CoAP status code (RFC 7252)
+     ? 2 => item-metadata,    ; Metadata of the content bundle
+     ? 3 => text              ; Diagnostic message (if error status)
+   }
+
+   item-metadata = {
+     0 => bytes,              ; SHA-256 hash of the resource (correlation key)
+     ? 1 => uint,             ; Size of the resource in octets
+     ? 2 => text,             ; MIME type / Format (e.g., "text/markdown")
+     ? 3 => text,             ; Explicit URI / URN / CID of the resource
+     ? 4 => uint              ; POSIX timestamp of last modification
+   }
+
+4.  Detailed Method and Operation Semantics
+
+   The DTN Basket Protocol specifies five different operations denoted
+   by the integer value in the op field (key 0) of each request-item in
+   a basket.  This section defines the precise operational logic,
+   responder behavior, and expectations for each method.
+
+4.1.  GET (op=0) - Resource Retrieval
+
+   The GET operation is used to request the complete, raw payload of a
+   specific resource identified by the uri field.
+
+   Upon receiving a successful GET request, the responder node MUST
+   perform the following actions:
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 4]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   *  Generate a control bundle carrying a basket-response mapping
+      containing an item-response for this query with the coap-status-
+      code set to 2.05 Content (69).  The item-metadata MUST be
+      populated with the SHA-256 hash (key 0), size (key 1), and MIME
+      type (key 2) of the resource.
+
+   *  Emit a separate, native BPv7 bundle containing only the raw
+      payload bytes of the resource in its payload block.  This raw
+      bundle MUST NOT contain any CBOR wrapper or application-level
+      headers.  The correlation between the control bundle and this raw
+      data bundle is performed out-of-band by comparing the SHA-256
+      hash.
+
+   If the requested resource is not available on the responder, it MUST
+   set the status code to 4.04 Not Found (132) and MUST NOT emit a data
+   bundle.
+
+4.2.  CHECK (op=1) - Metadata Verification
+
+   The CHECK operation allows a requester to query metadata (such as
+   existence, size, hash, or modification date) for a specified resource
+   without transferring its actual content payload.  This is highly
+   useful for optimizing bandwidth in congested or expensive links.
+
+   The responder node MUST return the metadata in the control bundle
+   (basket-response) using the item-metadata structure and set the
+   status code to 2.05 Content (69).
+
+   The responder MUST NOT generate any raw data bundle for a CHECK
+   operation.
+
+   If the resource does not exist, the responder MUST return the status
+   code 4.04 Not Found (132).
+
+4.3.  SEARCH (op=2) - Multi-Resource Discovery
+
+   The SEARCH operation is used for discovering multiple matching
+   resources based on criteria specified in the uri field (such as tags,
+   wildcard paths, or keyword filters).
+
+   When processing a SEARCH request, the responder node MUST perform the
+   following actions:
+
+   *  Find all matching resources in its local store.  Let the number of
+      matches be M.
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 5]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   *  Construct a single basket-response containing M individual item-
+      response elements.  Each of these response elements MUST set
+      item_idx to the index of the original SEARCH query in the basket.
+      Multiple item-response maps inside a basket-response array MAY
+      share the same item_idx value when the search operation yields
+      multiple matching resources for that query.
+
+   *  Generate a separate raw BPv7 bundle for each matched resource,
+      totaling M data bundles.
+
+   To prevent traffic amplification attacks in bandwidth-constrained
+   environments, the responder SHOULD enforce an upper limit of results
+   M_max (e.g., M <= 50).  If the number of matching resources exceeds
+   M_max, the responder SHOULD NOT emit the individual data bundles.
+   Instead, the responder SHOULD substitute the execution with a LIST
+   operation (op=4) to return a single bibliographic index bundle.
+
+4.4.  CANCEL (op=3) - Pending Request Abort
+
+   The CANCEL operation aborts the processing and transmission of all
+   bundles associated with a previously submitted request identified by
+   the value in the uri field (which maps to the targeted req_id).
+
+   Intermediary store-and-forward nodes processing a CANCEL request MUST
+   search their local queues for pending bundles matching the targeted
+   req_id (both control bundles and data bundles) and purge them.  They
+   MUST also forward the CANCEL bundle downstream.
+
+   The final target node, if still processing the original request, MUST
+   immediately abort execution and return a basket-response containing
+   an item-response with the status code set to 2.02 Deleted (66).  This
+   response bundle MUST NOT be propagated further.
+
+4.5.  LIST (op=4) - Bibliographic Indexing
+
+   The LIST operation is designed to obtain a structured, lightweight
+   index of resources matching the search criteria without transferring
+   the individual resources.
+
+   The responder node MUST compile a single text document using the
+   text/markdown format listing all matching resources.  Each entry in
+   the document MUST contain bibliographic fields formatted as an
+   AsciiDoc-style front-matter block or key-value list including fields
+   such as Title, Author, MIME, Size, POSIX Date, SHA-256 hash, and Page
+   count (if applicable).
+
+   The responder MUST emit exactly two bundles:
+
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 6]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   1.  One control bundle containing a basket-response mapping with
+       status 2.05 Content (69) referencing the compiled document's
+       metadata.
+
+   2.  One raw data bundle containing only the compiled text/markdown
+       index document.
+
+4.6.  Payload-to-Metadata Correlation
+
+   Raw BPv7 data bundles carry no application-level headers, metadata,
+   or CBOR encapsulation.  Instead, receiving nodes MUST use the
+   following correlation procedure to bind incoming unencapsulated data
+   bundles to their corresponding request context:
+
+   1.  Upon receiving an unencapsulated data bundle, the receiver MUST
+       compute the SHA-256 digest of the bundle's payload block.
+
+   2.  The receiver MUST query its stored basket-response tables (or
+       active request context) for an item-metadata entry where Key 0
+       (hash) matches the computed SHA-256 digest.
+
+   3.  Upon a successful match, the data payload IS bound to the
+       corresponding request identifier (req_id) and item index
+       (item_idx).
+
+5.  Node Behavior and Execution Semantics
+
+5.1.  Requester Operations
+
+   The sending node MUST assign a unique req_id.  It MUST order the
+   elements of the request-item array in descending order of priority
+   (index 0 representing the highest priority).
+
+5.2.  Forwarder and Intermediary Node Operations
+
+   An intermediary node possessing in its local cache all or part of the
+   requested resources MAY generate the corresponding response bundles.
+   When responding partially:
+
+   *  It MUST transmit the application bundle basket-response containing
+      the resolved items to the reply_to or the BPv7 source.
+
+   *  It MUST forward the original basket-request bundle strictly
+      unchanged to adjacent nodes to maintain BPSec integrity
+      ([RFC9182]).
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 7]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+5.3.  Responder Operations and Lifetime Mapping
+
+   When generating a response bundle (metadata or raw content), the
+   responder MUST configure the Lifetime field of the BPv7 Primary Block
+   according to the following order of precedence:
+
+   1.  The value of the item.lifetime field (key 6) if defined.
+
+   2.  The value of the basket-request.default-lifetime field (key 3) if
+       defined.
+
+   3.  The default configuration of the local responder node.
+
+6.  CoAP Status Codes Mapping
+
+   The coap-status-code field of the item-response component MUST use
+   the registry defined by RFC 7252 [RFC7252].  The following codes are
+   defined by this specification:
+
+      +==============+===============+=============================+
+      | Decimal Code | CoAP Code     | DTN Application Description |
+      +==============+===============+=============================+
+      | 66           | 2.02 Deleted  | Success of a CANCEL         |
+      |              |               | operation (op=3)            |
+      +--------------+---------------+-----------------------------+
+      | 69           | 2.05 Content  | Success for GET, CHECK,     |
+      |              |               | SEARCH, LIST                |
+      +--------------+---------------+-----------------------------+
+      | 132          | 4.04 Not      | Resource not found          |
+      |              | Found         |                             |
+      +--------------+---------------+-----------------------------+
+      | 134          | 4.06 Not      | Format incompatible with    |
+      |              | Acceptable    | accept filters              |
+      +--------------+---------------+-----------------------------+
+      | 141          | 4.13 Payload  | Size exceeding the max_size |
+      |              | Too Large     | constraint                  |
+      +--------------+---------------+-----------------------------+
+      | 160          | 5.00 Internal | Internal responder error    |
+      |              | Error         |                             |
+      +--------------+---------------+-----------------------------+
+
+                    Table 1: CoAP Response Codes Usage
+
+7.  Security Considerations
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 8]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+7.1.  Amplification Attacks
+
+   The SEARCH operation (op=2) presents a traffic amplification risk
+   (transmission of 1 + M bundles).  Responder nodes SHOULD impose a
+   maximum result limit (e.g., M <= 50).  Beyond this limit, the
+   responder SHOULD substitute the execution with a LIST operation
+   (op=4) and return a single report.
+
+7.2.  Content Correlation and Verification
+
+   The receiving node MUST validate the integrity of each raw content
+   bundle received separately by computing its SHA-256 hash and
+   comparing it with field 0 of the item-metadata structure transmitted
+   in the basket-response bundle.
+
+8.  IANA Considerations
+
+   This document requests the creation of three IANA registries/
+   registrations:
+
+   *  An entry in the _CBOR Tags Registry_ for the DTN Basket
+      application tag.
+
+   *  The registration of the MIME types application/dtn-basket-
+      request+cbor and application/dtn-basket-response+cbor in the
+      _Media Types_ registry.
+
+   *  The creation of the _DTN Basket Operations Registry_ for managing
+      operation integers (0=GET, 1=CHECK, 2=SEARCH, 3=CANCEL, 4=LIST).
+
+9.  References
+
+9.1.  Normative References
+
+   [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
+              Requirement Levels", BCP 14, RFC 2119,
+              DOI 10.17487/RFC2119, March 1997,
+              <https://www.rfc-editor.org/info/rfc2119>.
+
+   [RFC7252]  Shelby, Z., Hartke, K., and C. Bormann, "The Constrained
+              Application Protocol (CoAP)", RFC 7252,
+              DOI 10.17487/RFC7252, June 2014,
+              <https://www.rfc-editor.org/info/rfc7252>.
+
+   [RFC8174]  Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC
+              2119 Key Words", BCP 14, RFC 8174, DOI 10.17487/RFC8174,
+              May 2017, <https://www.rfc-editor.org/info/rfc8174>.
+
+
+
+
+F4JXQ                   Expires 11 February 2027                [Page 9]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   [RFC8610]  Birkholz, H., Vigano, C., and C. Bormann, "Concise Data
+              Definition Language (CDDL): A Notational Convention to
+              Express Concise Binary Object Representation (CBOR) and
+              JSON Data Structures", RFC 8610, DOI 10.17487/RFC8610,
+              June 2019, <https://www.rfc-editor.org/info/rfc8610>.
+
+   [RFC8949]  Bormann, C. and P. Hoffman, "Concise Binary Object
+              Representation (CBOR)", STD 94, RFC 8949,
+              DOI 10.17487/RFC8949, December 2020,
+              <https://www.rfc-editor.org/info/rfc8949>.
+
+   [RFC9171]  Burleigh, S., Fall, K., and E. Birrane, III, "Bundle
+              Protocol Version 7", RFC 9171, DOI 10.17487/RFC9171,
+              January 2022, <https://www.rfc-editor.org/info/rfc9171>.
+
+   [RFC9182]  Barguil, S., Gonzalez de Dios, O., Ed., Boucadair, M.,
+              Ed., Munoz, L., and A. Aguado, "A YANG Network Data Model
+              for Layer 3 VPNs", RFC 9182, DOI 10.17487/RFC9182,
+              February 2022, <https://www.rfc-editor.org/info/rfc9182>.
+
+Appendix A.  Informative Examples and Sequence Traces
+
+A.1.  Scenario 1: Multi-Item Priority Request (GET and CHECK)
+
+   In this scenario, the requester submits a single basket requesting to
+   verify the metadata of an APK patch (using CHECK) and retrieve a
+   specific file content (using GET).
+
+   Conceptual JSON Basket Request:
+
+   {
+     "req_id": "req-abc-123",
+     "items": [
+       {
+         "op": 1,
+         "uri": "https://example.com/sys/patches/apk-patch-v2.1.bin",
+         "max_size": 10485760
+       },
+       {
+         "op": 0,
+         "uri": "dtn:cid:bafybeiccf2"
+       }
+     ]
+   }
+
+   CBOR Diagnostic Notation representing the request, wrapped in CBOR
+   Tag 44444:
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 10]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   44444({
+     0: 1,
+     1: "req-abc-123",
+     4: [
+       {
+         0: 1,
+         1: "https://example.com/sys/patches/apk-patch-v2.1.bin",
+         2: 10485760
+       },
+       {
+         0: 0,
+         1: "dtn:cid:bafybeiccf2"
+       }
+     ]
+   })
+
+   The responder processes the basket and returns a single basket-
+   response containing status reports for both items.
+
+   Conceptual JSON Basket Response:
+
+   {
+     "req_id": "req-abc-123",
+     "items": [
+       {
+         "item_idx": 0,
+         "coap_status": 69,
+         "metadata": {
+           "hash": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+           "size": 4500000,
+           "mime": "application/octet-stream"
+         }
+       },
+       {
+         "item_idx": 1,
+         "coap_status": 69,
+         "metadata": {
+           "hash": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e",
+           "size": 120000,
+           "mime": "text/markdown"
+         }
+       }
+     ]
+   }
+
+   CBOR Diagnostic Notation representing the response, wrapped in CBOR
+   Tag 44444:
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 11]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   44444({
+     0: 1,
+     1: "req-abc-123",
+     2: [
+       {
+         0: 0,
+         1: 69,
+         2: {
+           0: h'1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b',
+           1: 4500000,
+           2: "application/octet-stream"
+         }
+       },
+       {
+         0: 1,
+         1: 69,
+         2: {
+           0: h'9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e',
+           1: 120000,
+           2: "text/markdown"
+         }
+       }
+     ]
+   })
+
+   Data Plane Transfer:
+
+   Exactly one raw content bundle is generated by the responder,
+   carrying the payload bytes for the resource at dtn:cid:bafybeiccf2
+   (120,000 bytes).  No raw bundle is generated for the CHECK operation
+   on the APK patch.
+
+A.2.  Scenario 2: Bibliographic Index Request (LIST)
+
+   The requester wants to list available radio documentation relating to
+   Yaesu FT-817 transceiver.
+
+   Conceptual JSON Basket Request:
+
+   {
+     "req_id": "req-xyz-789",
+     "items": [
+       {
+         "op": 4,
+         "uri": "tag:yaesu #ft-817"
+       }
+     ]
+   }
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 12]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   CBOR Diagnostic Notation representing the request, wrapped in CBOR
+   Tag 44444:
+
+   44444({
+     0: 1,
+     1: "req-xyz-789",
+     4: [
+       {
+         0: 4,
+         1: "tag:yaesu #ft-817"
+       }
+     ]
+   })
+
+   The responder generates a control bundle and compiles the index
+   document in Markdown.
+
+   Conceptual JSON Basket Response:
+
+   {
+     "req_id": "req-xyz-789",
+     "items": [
+       {
+         "item_idx": 0,
+         "coap_status": 69,
+         "metadata": {
+           "hash": "3d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+           "size": 420,
+           "mime": "text/markdown"
+         }
+       }
+     ]
+   }
+
+   CBOR Diagnostic Notation representing the response, wrapped in CBOR
+   Tag 44444:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 13]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   44444({
+     0: 1,
+     1: "req-xyz-789",
+     2: [
+       {
+         0: 0,
+         1: 69,
+         2: {
+           0: h'3d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f',
+           1: 420,
+           2: "text/markdown"
+         }
+       }
+     ]
+   })
+
+   The content of the raw data bundle transmitted separately:
+
+   # Bibliographic Index: tag:yaesu #ft-817
+
+   ---
+   Title: Yaesu FT-817 Operating Manual
+   Author: Yaesu Musen Co., Ltd.
+   MIME: application/pdf
+   Size: 5242880
+   POSIX Date: 1627776000
+   SHA-256: d8e9f0a1b2c3d4e5f3d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7
+   Pages: 78
+   ---
+   Title: FT-817 Portable Antenna Guide
+   Author: Amateur Radio Community
+   MIME: text/markdown
+   Size: 12450
+   POSIX Date: 1723328000
+   SHA-256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+   Pages: 12
+   ---
+
+A.3.  Scenario 3: Delta Synchronization with Hashes (SEARCH)
+
+   The requester searches for files tagged as "emergency-medical-guide"
+   but already has two of the manuals.  To prevent sending duplicate
+   documents, the requester lists truncated 8-byte hashes of the manuals
+   it already owns in have_hashes.
+
+   Conceptual JSON Basket Request:
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 14]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   {
+     "req_id": "req-sync-456",
+     "items": [
+       {
+         "op": 2,
+         "uri": "tag:emergency-medical-guide",
+         "have_hashes": [
+           "4a3f12bc09de7856",
+           "8f7e6d5c4b3a2f1e"
+         ]
+       }
+     ]
+   }
+
+   CBOR Diagnostic Notation representing the request, wrapped in CBOR
+   Tag 44444:
+
+   44444({
+     0: 1,
+     1: "req-sync-456",
+     4: [
+       {
+         0: 2,
+         1: "tag:emergency-medical-guide",
+         4: [
+           h'4a3f12bc09de7856',
+           h'8f7e6d5c4b3a2f1e'
+         ]
+       }
+     ]
+   })
+
+   The responder matches 3 guides.  Since 2 matches have truncated
+   hashes matching those in have_hashes, the responder registers all 3
+   matches but only sends the raw payload bundle for the third guide
+   (the new one).
+
+   Conceptual JSON Basket Response:
+
+
+
+
+
+
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 15]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   {
+     "req_id": "req-sync-456",
+     "items": [
+       {
+         "item_idx": 0,
+         "coap_status": 69,
+         "metadata": {
+           "hash": "4a3f12bc09de7856e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0",
+           "size": 250000,
+           "mime": "application/pdf"
+         }
+       },
+       {
+         "item_idx": 0,
+         "coap_status": 69,
+         "metadata": {
+           "hash": "8f7e6d5c4b3a2f1ee7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0",
+           "size": 310000,
+           "mime": "application/pdf"
+         }
+       },
+       {
+         "item_idx": 0,
+         "coap_status": 69,
+         "metadata": {
+           "hash": "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6",
+           "size": 180000,
+           "mime": "application/pdf"
+         }
+       }
+     ]
+   }
+
+   CBOR Diagnostic Notation representing the response, wrapped in CBOR
+   Tag 44444:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 16]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   44444({
+     0: 1,
+     1: "req-sync-456",
+     2: [
+       {
+         0: 0,
+         1: 69,
+         2: {
+           0: h'4a3f12bc09de7856e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0',
+           1: 250000,
+           2: "application/pdf"
+         }
+       },
+       {
+         0: 0,
+         1: 69,
+         2: {
+           0: h'8f7e6d5c4b3a2f1ee7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0',
+           1: 310000,
+           2: "application/pdf"
+         }
+       },
+       {
+         0: 0,
+         1: 69,
+         2: {
+           0: h'e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6',
+           1: 180000,
+           2: "application/pdf"
+         }
+       }
+     ]
+   })
+
+   Data Plane Transfer:
+
+   Only 1 raw data bundle containing Guide C (hash e5f6..., 180,000
+   bytes) is transmitted.  No data bundles are transmitted for Guide A
+   and B.
+
+A.4.  Scenario 4: Cancellation Trace (CANCEL)
+
+   The requester wants to cancel a previously sent, long-running request
+   with req_id set to "req-55555".
+
+   Conceptual JSON Basket Request:
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 17]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   {
+     "req_id": "req-cancel-999",
+     "items": [
+       {
+         "op": 3,
+         "uri": "req-55555"
+       }
+     ]
+   }
+
+   CBOR Diagnostic Notation representing the request, wrapped in CBOR
+   Tag 44444:
+
+   44444({
+     0: 1,
+     1: "req-cancel-999",
+     4: [
+       {
+         0: 3,
+         1: "req-55555"
+       }
+     ]
+   })
+
+   The responder aborts the execution and responds to confirm the
+   cancellation.
+
+   Conceptual JSON Basket Response:
+
+   {
+     "req_id": "req-cancel-999",
+     "items": [
+       {
+         "item_idx": 0,
+         "coap_status": 66,
+         "diagnostic": "Request req-55555 successfully aborted"
+       }
+     ]
+   }
+
+   CBOR Diagnostic Notation representing the response, wrapped in CBOR
+   Tag 44444:
+
+
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 18]
+
+Internet-Draft             DTN Basket Protocol               August 2026
+
+
+   44444({
+     0: 1,
+     1: "req-cancel-999",
+     2: [
+       {
+         0: 0,
+         1: 66,
+         3: "Request req-55555 successfully aborted"
+       }
+     ]
+   })
+
+Author's Address
+
+   F4JXQ
+   Federation - Open Space Maker
+   Email: loic@fejoz.net
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+F4JXQ                   Expires 11 February 2027               [Page 19]

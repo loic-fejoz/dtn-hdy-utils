@@ -5,7 +5,7 @@
      docName="draft-f4jxq-dtn-basket-00" 
      ipr="trust200902" 
      submissionType="IETF" 
-     xml:lang="fr" 
+     xml:lang="en" 
      version="3">
   <front>
     <title abbrev="DTN Basket Protocol">DTN Basket Protocol Specification</title>
@@ -24,37 +24,37 @@
 
     <abstract>
       <t>
-        Ce document spécifie le protocole DTN Basket, un schéma d'application binaire basé sur CBOR (RFC 8949) conçu pour l'agrégation, la requêtes multiples et le transfert synchrone/asynchrone de ressources dans des réseaux tolérants aux interruptions (DTN) exploitant le Bundle Protocol Version 7 (RFC 9171). Le protocole sépare le plan de contrôle (métadonnées structurées et statuts CoAP) du plan de données (contenu brut transmis en bundles distincts).
+        This document specifies the DTN Basket Protocol, a binary application schema based on CBOR (RFC 8949) designed for the aggregation, multi-requesting, and synchronous/asynchronous transfer of resources in delay-tolerant networks (DTNs) utilizing the Bundle Protocol Version 7 (RFC 9171). The protocol separates the control plane (structured metadata and CoAP statuses) from the data plane (raw content transmitted in distinct bundles).
       </t>
     </abstract>
   </front>
 
   <middle>
-    <section>
-      <name>1. Introduction</name>
+    <section anchor="introduction">
+      <name>Introduction</name>
       <t>
-        Dans les réseaux déconnectés ou intermittents régis par le Bundle Protocol v7 (BPv7, <xref target="RFC9171"/>), la réduction de l'overhead réseau est critique. Le protocole DTN Basket permet d'agréger plusieurs requêtes hétérogènes (récupération, vérification, recherche, annulation, indexation) au sein d'un panier unique encodé en CBOR (<xref target="RFC8949"/>).
+        In disconnected or intermittent networks governed by the Bundle Protocol v7 (BPv7, <xref target="RFC9171"/>), reducing network overhead is critical. The DTN Basket Protocol allows the aggregation of multiple heterogeneous requests (retrieval, verification, search, cancellation, listing) within a single basket encoded in CBOR (<xref target="RFC8949"/>).
       </t>
       <t>
-        Afin de garantir l'intégrité des données sous BPSec (<xref target="RFC9182"/>) tout en autorisant les réponses partielles par des nœuds intermédiaires, le protocole sépare le contrôle et le contenu :
+        To ensure data integrity under BPSec (<xref target="RFC9182"/>) while permitting partial responses by intermediary nodes, the protocol separates control and content:
       </t>
       <ul>
-        <li>Un bundle de contrôle CBOR (<tt>basket-response</tt>) véhiculant uniquement les métadonnées et les statuts d'exécution applicatifs.</li>
-        <li>Des bundles réseau BPv7 natifs véhiculant les charges utiles brutes de chaque ressource.</li>
+        <li>A CBOR control bundle (<tt>basket-response</tt>) carrying only metadata and application execution statuses.</li>
+        <li>Native BPv7 network bundles carrying the raw payloads of each resource.</li>
       </ul>
     </section>
 
-    <section>
-      <name>2. Terminology</name>
+    <section anchor="terminology">
+      <name>Terminology</name>
       <t>
-        Les mots-clés "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", et "OPTIONAL" dans ce document sont à interpréter comme décrit dans le BCP 14 <xref target="RFC2119"/> <xref target="RFC8174"/>.
+        The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in BCP 14 <xref target="RFC2119"/> <xref target="RFC8174"/>.
       </t>
     </section>
 
-    <section>
-      <name>3. Protocol Specification (CDDL)</name>
+    <section anchor="specification">
+      <name>Protocol Specification (CDDL)</name>
       <t>
-        La structure syntaxique exacte du panier de requêtes et de l'enveloppe de réponse est définie ci-dessous en CDDL (<xref target="RFC8610"/>).
+        The exact syntactical structure of the request basket and the response envelope is defined below in CDDL (<xref target="RFC8610"/>).
       </t>
       <sourcecode type="cddl">
 ; =====================================================================
@@ -62,139 +62,239 @@
 ; =====================================================================
 
 protocol-version = 1
-coap-status-code = uint .size 1 ; Codes de statut CoAP (RFC 7252)
+coap-status-code = uint .size 1 ; CoAP status codes (RFC 7252)
 
 ; ---------------------------------------------------------------------
-; 1. PANIER DE REQUÊTES (BASKET REQUEST)
+; 1. REQUEST BASKET (BASKET REQUEST)
 ; ---------------------------------------------------------------------
 
 basket-request = {
-  ? -1 => uint,            ; Tag d'expérimentation (ex: 44444)
-  0 => uint,               ; Version du protocole (protocol-version = 1)
-  1 => text / bytes,       ; Identifiant unique de la requête (req_id)
-  ? 2 => text,             ; Destination de réponse optionnelle (reply_to EID)
-  ? 3 => uint,             ; Lifetime par défaut des bundles de réponse (ms/s)
-  4 => [* request-item]    ; Tableau d'items ordonné par priorité
+  ? -1 => uint,            ; Experimentation tag (e.g., 44444)
+  0 => uint,               ; Protocol version (protocol-version = 1)
+  1 => text / bytes,       ; Unique identifier of the request (req_id)
+  ? 2 => text,             ; Optional reply destination (reply_to EID)
+  ? 3 => uint,             ; Default lifetime of response bundles (ms/s)
+  4 => [* request-item]    ; Array of items ordered by priority
 }
 
 request-item = {
-  0 => uint .default 0,    ; Opération: 0=GET, 1=CHECK, 2=SEARCH, 3=CANCEL, 4=LIST
+  0 => uint .default 0,    ; Operation: 0=GET, 1=CHECK, 2=SEARCH, 3=CANCEL, 4=LIST
   1 => text,               ; URI / URN / CID / Tag
-  ? 2 => uint,             ; Taille maximale acceptée en octets (max_size)
-  ? 3 => [* (uint / text)],; Formats acceptés (défaut = */*)
-  ? 4 => [* bytes],        ; Hachages tronqués déjà possédés (have_hashes)
-  ? 5 => uint,             ; Horodatage POSIX (if_modified_since)
-  ? 6 => uint              ; Surcharge du Lifetime pour la réponse de cet item (ms/s)
+  ? 2 => uint,             ; Maximum accepted size in octets (max_size)
+  ? 3 => [* (uint / text)],; Accepted formats (default = */*)
+  ? 4 => [* bytes],        ; Truncated hashes already owned (have_hashes)
+  ? 5 => uint,             ; POSIX timestamp (if_modified_since)
+  ? 6 => uint              ; Lifetime override for the response of this item (ms/s)
 }
 
 ; ---------------------------------------------------------------------
-; 2. RÉPONSE APPLICATIVE DE MÉTADONNÉES (BASKET RESPONSE)
+; 2. METADATA APPLICATION RESPONSE (BASKET RESPONSE)
 ; ---------------------------------------------------------------------
 
 basket-response = {
-  ? -1 => uint,            ; Tag d'expérimentation (ex: 44444)
-  0 => uint,               ; Version du protocole (protocol-version = 1)
-  1 => text / bytes,       ; Identifiant de la requête originale (req_id)
-  2 => [* item-response]   ; Tableau des résultats par item
+  ? -1 => uint,            ; Experimentation tag (e.g., 44444)
+  0 => uint,               ; Protocol version (protocol-version = 1)
+  1 => text / bytes,       ; Original request identifier (req_id)
+  2 => [* item-response]   ; Array of results per item
 }
 
 item-response = {
-  0 => uint,               ; Index de l'item dans le panier original (item_idx)
-  1 => coap-status-code,   ; Code de statut CoAP (RFC 7252)
-  ? 2 => item-metadata,    ; Métadonnées du bundle de contenu
-  ? 3 => text              ; Message de diagnostic (si statut d'erreur)
+  0 => uint,               ; Item index in the original basket (item_idx). Note: Multiple item-responses may share the same item_idx (e.g. for SEARCH).
+  1 => coap-status-code,   ; CoAP status code (RFC 7252)
+  ? 2 => item-metadata,    ; Metadata of the content bundle
+  ? 3 => text              ; Diagnostic message (if error status)
 }
 
 item-metadata = {
-  0 => bytes,              ; Hash SHA-256 de la ressource (clé de corrélation)
-  ? 1 => uint,             ; Taille de la ressource en octets
-  ? 2 => text,             ; Type MIME / Format (ex: "text/markdown")
-  ? 3 => text,             ; URI / URN / CID explicite de la ressource
-  ? 4 => uint              ; Horodatage POSIX de dernière modification
+  0 => bytes,              ; SHA-256 hash of the resource (correlation key)
+  ? 1 => uint,             ; Size of the resource in octets
+  ? 2 => text,             ; MIME type / Format (e.g., "text/markdown")
+  ? 3 => text,             ; Explicit URI / URN / CID of the resource
+  ? 4 => uint              ; POSIX timestamp of last modification
 }
       </sourcecode>
     </section>
 
-    <section>
-      <name>4. Node Behavior &amp; Execution Semantics</name>
-      
-      <section>
-        <name>4.1. Requester Operations</name>
-        <t>
-          Le nœud émetteur MUST attribuer un identifiant <tt>req_id</tt> unique. Il MUST ordonner les éléments du tableau <tt>request-item</tt> par ordre de priorité décroissante (l'index 0 représentant la priorité maximale).
-        </t>
-      </section>
+    <section anchor="detailed-semantics">
+      <name>Detailed Method and Operation Semantics</name>
+      <t>
+        The DTN Basket Protocol specifies five different operations denoted by the integer value in the <tt>op</tt> field (key 0) of each <tt>request-item</tt> in a basket. This section defines the precise operational logic, responder behavior, and expectations for each method.
+      </t>
 
-      <section>
-        <name>4.2. Forwarder and Intermediary Node Operations</name>
+      <section anchor="method-get">
+        <name>GET (op=0) - Resource Retrieval</name>
         <t>
-          Un nœud intermédiaire possédant en cache local tout ou partie des ressources demandées MAY générer les bundles de réponse correspondants. Lorsqu'il répond partiellement :
+          The <tt>GET</tt> operation is used to request the complete, raw payload of a specific resource identified by the <tt>uri</tt> field.
+        </t>
+        <t>
+          Upon receiving a successful <tt>GET</tt> request, the responder node MUST perform the following actions:
         </t>
         <ul>
-          <li>Il MUST émettre le bundle applicatif <tt>basket-response</tt> contenant les éléments résolus vers le <tt>reply_to</tt> ou la source BPv7.</li>
-          <li>Il MUST transférer le bundle <tt>basket-request</tt> original strictement inchangé vers les nœuds adjacents afin de maintenir l'intégrité BPSec (<xref target="RFC9182"/>).</li>
+          <li>Generate a control bundle carrying a <tt>basket-response</tt> mapping containing an <tt>item-response</tt> for this query with the <tt>coap-status-code</tt> set to <tt>2.05 Content</tt> (69). The <tt>item-metadata</tt> MUST be populated with the SHA-256 hash (key 0), size (key 1), and MIME type (key 2) of the resource.</li>
+          <li>Emit a separate, native BPv7 bundle containing only the raw payload bytes of the resource in its payload block. This raw bundle MUST NOT contain any CBOR wrapper or application-level headers. The correlation between the control bundle and this raw data bundle is performed out-of-band by comparing the SHA-256 hash.</li>
         </ul>
+        <t>
+          If the requested resource is not available on the responder, it MUST set the status code to <tt>4.04 Not Found</tt> (132) and MUST NOT emit a data bundle.
+        </t>
       </section>
 
-      <section>
-        <name>4.3. Responder Operations &amp; Lifetime Mapping</name>
+      <section anchor="method-check">
+        <name>CHECK (op=1) - Metadata Verification</name>
         <t>
-          Lors de la génération d'un bundle de réponse (métadonnées ou contenu brut), le répondeur MUST configurer le champ <tt>Lifetime</tt> du Primary Block BPv7 selon l'ordre de précédence suivant :
+          The <tt>CHECK</tt> operation allows a requester to query metadata (such as existence, size, hash, or modification date) for a specified resource without transferring its actual content payload. This is highly useful for optimizing bandwidth in congested or expensive links.
+        </t>
+        <t>
+          The responder node MUST return the metadata in the control bundle (<tt>basket-response</tt>) using the <tt>item-metadata</tt> structure and set the status code to <tt>2.05 Content</tt> (69).
+        </t>
+        <t>
+          The responder MUST NOT generate any raw data bundle for a <tt>CHECK</tt> operation.
+        </t>
+        <t>
+          If the resource does not exist, the responder MUST return the status code <tt>4.04 Not Found</tt> (132).
+        </t>
+      </section>
+
+      <section anchor="method-search">
+        <name>SEARCH (op=2) - Multi-Resource Discovery</name>
+        <t>
+          The <tt>SEARCH</tt> operation is used for discovering multiple matching resources based on criteria specified in the <tt>uri</tt> field (such as tags, wildcard paths, or keyword filters).
+        </t>
+        <t>
+          When processing a <tt>SEARCH</tt> request, the responder node MUST perform the following actions:
+        </t>
+        <ul>
+          <li>Find all matching resources in its local store. Let the number of matches be M.</li>
+          <li>Construct a single <tt>basket-response</tt> containing M individual <tt>item-response</tt> elements. Each of these response elements MUST set <tt>item_idx</tt> to the index of the original <tt>SEARCH</tt> query in the basket. Multiple <tt>item-response</tt> maps inside a <tt>basket-response</tt> array MAY share the same <tt>item_idx</tt> value when the search operation yields multiple matching resources for that query.</li>
+          <li>Generate a separate raw BPv7 bundle for each matched resource, totaling M data bundles.</li>
+        </ul>
+        <t>
+          To prevent traffic amplification attacks in bandwidth-constrained environments, the responder SHOULD enforce an upper limit of results M_max (e.g., M &lt;= 50). If the number of matching resources exceeds M_max, the responder SHOULD NOT emit the individual data bundles. Instead, the responder SHOULD substitute the execution with a <tt>LIST</tt> operation (op=4) to return a single bibliographic index bundle.
+        </t>
+      </section>
+
+      <section anchor="method-cancel">
+        <name>CANCEL (op=3) - Pending Request Abort</name>
+        <t>
+          The <tt>CANCEL</tt> operation aborts the processing and transmission of all bundles associated with a previously submitted request identified by the value in the <tt>uri</tt> field (which maps to the targeted <tt>req_id</tt>).
+        </t>
+        <t>
+          Intermediary store-and-forward nodes processing a <tt>CANCEL</tt> request MUST search their local queues for pending bundles matching the targeted <tt>req_id</tt> (both control bundles and data bundles) and purge them. They MUST also forward the <tt>CANCEL</tt> bundle downstream.
+        </t>
+        <t>
+          The final target node, if still processing the original request, MUST immediately abort execution and return a <tt>basket-response</tt> containing an <tt>item-response</tt> with the status code set to <tt>2.02 Deleted</tt> (66). This response bundle MUST NOT be propagated further.
+        </t>
+      </section>
+
+      <section anchor="method-list">
+        <name>LIST (op=4) - Bibliographic Indexing</name>
+        <t>
+          The <tt>LIST</tt> operation is designed to obtain a structured, lightweight index of resources matching the search criteria without transferring the individual resources.
+        </t>
+        <t>
+          The responder node MUST compile a single text document using the <tt>text/markdown</tt> format listing all matching resources. Each entry in the document MUST contain bibliographic fields formatted as an AsciiDoc-style front-matter block or key-value list including fields such as Title, Author, MIME, Size, POSIX Date, SHA-256 hash, and Page count (if applicable).
+        </t>
+        <t>
+          The responder MUST emit exactly two bundles:
         </t>
         <ol>
-          <li>La valeur du champ <tt>item.lifetime</tt> (clé 6) si définie.</li>
-          <li>La valeur du champ <tt>basket-request.default-lifetime</tt> (clé 3) si définie.</li>
-          <li>La configuration par défaut du nœud répondeur local.</li>
+          <li>One control bundle containing a <tt>basket-response</tt> mapping with status <tt>2.05 Content</tt> (69) referencing the compiled document's metadata.</li>
+          <li>One raw data bundle containing only the compiled <tt>text/markdown</tt> index document.</li>
+        </ol>
+      </section>
+
+      <section anchor="method-correlation">
+        <name>Payload-to-Metadata Correlation</name>
+        <t>
+          Raw BPv7 data bundles carry no application-level headers, metadata, or CBOR encapsulation. Instead, receiving nodes MUST use the following correlation procedure to bind incoming unencapsulated data bundles to their corresponding request context:
+        </t>
+        <ol>
+          <li>Upon receiving an unencapsulated data bundle, the receiver MUST compute the SHA-256 digest of the bundle's payload block.</li>
+          <li>The receiver MUST query its stored <tt>basket-response</tt> tables (or active request context) for an <tt>item-metadata</tt> entry where Key 0 (<tt>hash</tt>) matches the computed SHA-256 digest.</li>
+          <li>Upon a successful match, the data payload IS bound to the corresponding request identifier (<tt>req_id</tt>) and item index (<tt>item_idx</tt>).</li>
         </ol>
       </section>
     </section>
 
-    <section>
-      <name>5. CoAP Status Codes Mapping</name>
+    <section anchor="behavior">
+      <name>Node Behavior and Execution Semantics</name>
+      
+      <section anchor="requester-ops">
+        <name>Requester Operations</name>
+        <t>
+          The sending node MUST assign a unique <tt>req_id</tt>. It MUST order the elements of the <tt>request-item</tt> array in descending order of priority (index 0 representing the highest priority).
+        </t>
+      </section>
+
+      <section anchor="forwarder-ops">
+        <name>Forwarder and Intermediary Node Operations</name>
+        <t>
+          An intermediary node possessing in its local cache all or part of the requested resources MAY generate the corresponding response bundles. When responding partially:
+        </t>
+        <ul>
+          <li>It MUST transmit the application bundle <tt>basket-response</tt> containing the resolved items to the <tt>reply_to</tt> or the BPv7 source.</li>
+          <li>It MUST forward the original <tt>basket-request</tt> bundle strictly unchanged to adjacent nodes to maintain BPSec integrity (<xref target="RFC9182"/>).</li>
+        </ul>
+      </section>
+
+      <section anchor="responder-ops">
+        <name>Responder Operations and Lifetime Mapping</name>
+        <t>
+          When generating a response bundle (metadata or raw content), the responder MUST configure the <tt>Lifetime</tt> field of the BPv7 Primary Block according to the following order of precedence:
+        </t>
+        <ol>
+          <li>The value of the <tt>item.lifetime</tt> field (key 6) if defined.</li>
+          <li>The value of the <tt>basket-request.default-lifetime</tt> field (key 3) if defined.</li>
+          <li>The default configuration of the local responder node.</li>
+        </ol>
+      </section>
+    </section>
+
+    <section anchor="coap-mapping">
+      <name>CoAP Status Codes Mapping</name>
       <t>
-        Le champ <tt>coap-status-code</tt> du composant <tt>item-response</tt> MUST utiliser le registre défini par la RFC 7252 <xref target="RFC7252"/>. Les codes suivants sont prévus par la spécification :
+        The <tt>coap-status-code</tt> field of the <tt>item-response</tt> component MUST use the registry defined by RFC 7252 <xref target="RFC7252"/>. The following codes are defined by this specification:
       </t>
       <table>
         <name>CoAP Response Codes Usage</name>
         <thead>
-          <tr><th>Code Decimal</th><th>Code CoAP</th><th>Description applicative DTN</th></tr>
+          <tr><th>Decimal Code</th><th>CoAP Code</th><th>DTN Application Description</th></tr>
         </thead>
         <tbody>
-          <tr><td>66</td><td>2.02 Deleted</td><td>Succès d'une opération CANCEL (<tt>op=3</tt>)</td></tr>
-          <tr><td>69</td><td>2.05 Content</td><td>Succès pour GET, CHECK, SEARCH, LIST</td></tr>
-          <tr><td>132</td><td>4.04 Not Found</td><td>Ressource non localisée</td></tr>
-          <tr><td>134</td><td>4.06 Not Acceptable</td><td>Format incompatible avec les filtres <tt>accept</tt></td></tr>
-          <tr><td>141</td><td>4.13 Payload Too Large</td><td>Taille supérieure à la contrainte <tt>max_size</tt></td></tr>
-          <tr><td>160</td><td>5.00 Internal Error</td><td>Défaillance interne du répondeur</td></tr>
+          <tr><td>66</td><td>2.02 Deleted</td><td>Success of a CANCEL operation (<tt>op=3</tt>)</td></tr>
+          <tr><td>69</td><td>2.05 Content</td><td>Success for GET, CHECK, SEARCH, LIST</td></tr>
+          <tr><td>132</td><td>4.04 Not Found</td><td>Resource not found</td></tr>
+          <tr><td>134</td><td>4.06 Not Acceptable</td><td>Format incompatible with <tt>accept</tt> filters</td></tr>
+          <tr><td>141</td><td>4.13 Payload Too Large</td><td>Size exceeding the <tt>max_size</tt> constraint</td></tr>
+          <tr><td>160</td><td>5.00 Internal Error</td><td>Internal responder error</td></tr>
         </tbody>
       </table>
     </section>
 
-    <section>
-      <name>6. Security Considerations</name>
-      <section>
-        <name>6.1. Amplification Attacks</name>
+    <section anchor="security">
+      <name>Security Considerations</name>
+      <section anchor="sec-amplification">
+        <name>Amplification Attacks</name>
         <t>
-          L'opération <tt>SEARCH</tt> (<tt>op=2</tt>) présente un risque d'amplification de trafic (émission de $1 + M$ bundles). Les nœuds répondeurs SHOULD imposer une limite maximale de résultats (ex: $M \le 50$). Au-delà, le répondeur SHOULD substituer le traitement en opération <tt>LIST</tt> (<tt>op=4</tt>) et renvoyer un rapport unique.
+          The <tt>SEARCH</tt> operation (<tt>op=2</tt>) presents a traffic amplification risk (transmission of 1 + M bundles). Responder nodes SHOULD impose a maximum result limit (e.g., M &lt;= 50). Beyond this limit, the responder SHOULD substitute the execution with a <tt>LIST</tt> operation (<tt>op=4</tt>) and return a single report.
         </t>
       </section>
-      <section>
-        <name>6.2. Content Correlation and Verification</name>
+      <section anchor="sec-verification">
+        <name>Content Correlation and Verification</name>
         <t>
-          Le nœud récepteur MUST valider l'intégrité de chaque bundle de contenu brut reçu séparément en calculant son empreinte SHA-256 et en la comparant avec le champ <tt>0</tt> de la structure <tt>item-metadata</tt> transmis dans le bundle <tt>basket-response</tt>.
+          The receiving node MUST validate the integrity of each raw content bundle received separately by computing its SHA-256 hash and comparing it with field <tt>0</tt> of the <tt>item-metadata</tt> structure transmitted in the <tt>basket-response</tt> bundle.
         </t>
       </section>
     </section>
 
-    <section>
-      <name>7. IANA Considerations</name>
+    <section anchor="iana">
+      <name>IANA Considerations</name>
       <t>
-        Ce document demande la création de trois enregistrements IANA :
+        This document requests the creation of three IANA registries/registrations:
       </t>
       <ul>
-        <li>Un enregistrement dans le registre <em>CBOR Tags Registry</em> pour le tag applicatif DTN Basket.</li>
-        <li>L'enregistrement des types MIME <tt>application/dtn-basket-request+cbor</tt> et <tt>application/dtn-basket-response+cbor</tt> dans le registre <em>Media Types</em>.</li>
-        <li>La création du registre <em>DTN Basket Operations Registry</em> pour la gestion des entiers d'opérations (<tt>0=GET</tt>, <tt>1=CHECK</tt>, <tt>2=SEARCH</tt>, <tt>3=CANCEL</tt>, <tt>4=LIST</tt>).</li>
+        <li>An entry in the <em>CBOR Tags Registry</em> for the DTN Basket application tag.</li>
+        <li>The registration of the MIME types <tt>application/dtn-basket-request+cbor</tt> and <tt>application/dtn-basket-response+cbor</tt> in the <em>Media Types</em> registry.</li>
+        <li>The creation of the <em>DTN Basket Operations Registry</em> for managing operation integers (<tt>0=GET</tt>, <tt>1=CHECK</tt>, <tt>2=SEARCH</tt>, <tt>3=CANCEL</tt>, <tt>4=LIST</tt>).</li>
       </ul>
     </section>
   </middle>
@@ -213,5 +313,421 @@ item-metadata = {
         <xi:include href="https://xml2rfc.tools.ietf.org/public/rfc/bibxml/reference.RFC.9182.xml"/>
       </references>
     </references>
+
+    <section anchor="informative-examples">
+      <name>Informative Examples and Sequence Traces</name>
+      
+      <section anchor="scenario-priority-req">
+        <name>Scenario 1: Multi-Item Priority Request (GET and CHECK)</name>
+        <t>
+          In this scenario, the requester submits a single basket requesting to verify the metadata of an APK patch (using <tt>CHECK</tt>) and retrieve a specific file content (using <tt>GET</tt>).
+        </t>
+        <t>
+          Conceptual JSON Basket Request:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-abc-123",
+  "items": [
+    {
+      "op": 1,
+      "uri": "https://example.com/sys/patches/apk-patch-v2.1.bin",
+      "max_size": 10485760
+    },
+    {
+      "op": 0,
+      "uri": "dtn:cid:bafybeiccf2"
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the request, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-abc-123",
+  4: [
+    {
+      0: 1,
+      1: "https://example.com/sys/patches/apk-patch-v2.1.bin",
+      2: 10485760
+    },
+    {
+      0: 0,
+      1: "dtn:cid:bafybeiccf2"
+    }
+  ]
+})
+        </sourcecode>
+        <t>
+          The responder processes the basket and returns a single <tt>basket-response</tt> containing status reports for both items.
+        </t>
+        <t>
+          Conceptual JSON Basket Response:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-abc-123",
+  "items": [
+    {
+      "item_idx": 0,
+      "coap_status": 69,
+      "metadata": {
+        "hash": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+        "size": 4500000,
+        "mime": "application/octet-stream"
+      }
+    },
+    {
+      "item_idx": 1,
+      "coap_status": 69,
+      "metadata": {
+        "hash": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e",
+        "size": 120000,
+        "mime": "text/markdown"
+      }
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the response, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-abc-123",
+  2: [
+    {
+      0: 0,
+      1: 69,
+      2: {
+        0: h'1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b',
+        1: 4500000,
+        2: "application/octet-stream"
+      }
+    },
+    {
+      0: 1,
+      1: 69,
+      2: {
+        0: h'9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e',
+        1: 120000,
+        2: "text/markdown"
+      }
+    }
+  ]
+})
+        </sourcecode>
+        <t>
+          Data Plane Transfer:
+        </t>
+        <t>
+          Exactly one raw content bundle is generated by the responder, carrying the payload bytes for the resource at <tt>dtn:cid:bafybeiccf2</tt> (120,000 bytes). No raw bundle is generated for the <tt>CHECK</tt> operation on the APK patch.
+        </t>
+      </section>
+
+      <section anchor="scenario-list-req">
+        <name>Scenario 2: Bibliographic Index Request (LIST)</name>
+        <t>
+          The requester wants to list available radio documentation relating to Yaesu FT-817 transceiver.
+        </t>
+        <t>
+          Conceptual JSON Basket Request:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-xyz-789",
+  "items": [
+    {
+      "op": 4,
+      "uri": "tag:yaesu #ft-817"
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the request, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-xyz-789",
+  4: [
+    {
+      0: 4,
+      1: "tag:yaesu #ft-817"
+    }
+  ]
+})
+        </sourcecode>
+        <t>
+          The responder generates a control bundle and compiles the index document in Markdown.
+        </t>
+        <t>
+          Conceptual JSON Basket Response:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-xyz-789",
+  "items": [
+    {
+      "item_idx": 0,
+      "coap_status": 69,
+      "metadata": {
+        "hash": "3d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+        "size": 420,
+        "mime": "text/markdown"
+      }
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the response, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-xyz-789",
+  2: [
+    {
+      0: 0,
+      1: 69,
+      2: {
+        0: h'3d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f',
+        1: 420,
+        2: "text/markdown"
+      }
+    }
+  ]
+})
+        </sourcecode>
+        <t>
+          The content of the raw data bundle transmitted separately:
+        </t>
+        <sourcecode type="markdown">
+# Bibliographic Index: tag:yaesu #ft-817
+
+---
+Title: Yaesu FT-817 Operating Manual
+Author: Yaesu Musen Co., Ltd.
+MIME: application/pdf
+Size: 5242880
+POSIX Date: 1627776000
+SHA-256: d8e9f0a1b2c3d4e5f3d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7
+Pages: 78
+---
+Title: FT-817 Portable Antenna Guide
+Author: Amateur Radio Community
+MIME: text/markdown
+Size: 12450
+POSIX Date: 1723328000
+SHA-256: 1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+Pages: 12
+---
+        </sourcecode>
+      </section>
+
+      <section anchor="scenario-search-sync">
+        <name>Scenario 3: Delta Synchronization with Hashes (SEARCH)</name>
+        <t>
+          The requester searches for files tagged as "emergency-medical-guide" but already has two of the manuals. To prevent sending duplicate documents, the requester lists truncated 8-byte hashes of the manuals it already owns in <tt>have_hashes</tt>.
+        </t>
+        <t>
+          Conceptual JSON Basket Request:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-sync-456",
+  "items": [
+    {
+      "op": 2,
+      "uri": "tag:emergency-medical-guide",
+      "have_hashes": [
+        "4a3f12bc09de7856",
+        "8f7e6d5c4b3a2f1e"
+      ]
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the request, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-sync-456",
+  4: [
+    {
+      0: 2,
+      1: "tag:emergency-medical-guide",
+      4: [
+        h'4a3f12bc09de7856',
+        h'8f7e6d5c4b3a2f1e'
+      ]
+    }
+  ]
+})
+        </sourcecode>
+        <t>
+          The responder matches 3 guides. Since 2 matches have truncated hashes matching those in <tt>have_hashes</tt>, the responder registers all 3 matches but only sends the raw payload bundle for the third guide (the new one).
+        </t>
+        <t>
+          Conceptual JSON Basket Response:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-sync-456",
+  "items": [
+    {
+      "item_idx": 0,
+      "coap_status": 69,
+      "metadata": {
+        "hash": "4a3f12bc09de7856e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0",
+        "size": 250000,
+        "mime": "application/pdf"
+      }
+    },
+    {
+      "item_idx": 0,
+      "coap_status": 69,
+      "metadata": {
+        "hash": "8f7e6d5c4b3a2f1ee7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0",
+        "size": 310000,
+        "mime": "application/pdf"
+      }
+    },
+    {
+      "item_idx": 0,
+      "coap_status": 69,
+      "metadata": {
+        "hash": "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6",
+        "size": 180000,
+        "mime": "application/pdf"
+      }
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the response, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-sync-456",
+  2: [
+    {
+      0: 0,
+      1: 69,
+      2: {
+        0: h'4a3f12bc09de7856e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0',
+        1: 250000,
+        2: "application/pdf"
+      }
+    },
+    {
+      0: 0,
+      1: 69,
+      2: {
+        0: h'8f7e6d5c4b3a2f1ee7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0',
+        1: 310000,
+        2: "application/pdf"
+      }
+    },
+    {
+      0: 0,
+      1: 69,
+      2: {
+        0: h'e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6',
+        1: 180000,
+        2: "application/pdf"
+      }
+    }
+  ]
+})
+        </sourcecode>
+        <t>
+          Data Plane Transfer:
+        </t>
+        <t>
+          Only 1 raw data bundle containing Guide C (hash <tt>e5f6...</tt>, 180,000 bytes) is transmitted. No data bundles are transmitted for Guide A and B.
+        </t>
+      </section>
+
+      <section anchor="scenario-cancel-req">
+        <name>Scenario 4: Cancellation Trace (CANCEL)</name>
+        <t>
+          The requester wants to cancel a previously sent, long-running request with <tt>req_id</tt> set to "req-55555".
+        </t>
+        <t>
+          Conceptual JSON Basket Request:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-cancel-999",
+  "items": [
+    {
+      "op": 3,
+      "uri": "req-55555"
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the request, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-cancel-999",
+  4: [
+    {
+      0: 3,
+      1: "req-55555"
+    }
+  ]
+})
+        </sourcecode>
+        <t>
+          The responder aborts the execution and responds to confirm the cancellation.
+        </t>
+        <t>
+          Conceptual JSON Basket Response:
+        </t>
+        <sourcecode type="json">
+{
+  "req_id": "req-cancel-999",
+  "items": [
+    {
+      "item_idx": 0,
+      "coap_status": 66,
+      "diagnostic": "Request req-55555 successfully aborted"
+    }
+  ]
+}
+        </sourcecode>
+        <t>
+          CBOR Diagnostic Notation representing the response, wrapped in CBOR Tag 44444:
+        </t>
+        <sourcecode type="cbor-diag">
+44444({
+  0: 1,
+  1: "req-cancel-999",
+  2: [
+    {
+      0: 0,
+      1: 66,
+      3: "Request req-55555 successfully aborted"
+    }
+  ]
+})
+        </sourcecode>
+      </section>
+    </section>
   </back>
 </rfc>
