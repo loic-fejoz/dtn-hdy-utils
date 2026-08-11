@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bytes::Bytes;
 use clap::Parser;
+use dtn_hdy_utils::resolve_grpc_port;
 use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
 use hardy_bpa::async_trait;
 use hardy_bpa::bpa::BpaRegistration;
@@ -136,6 +137,8 @@ struct Config {
     allowed_dirs: Vec<PathBuf>,
     #[serde(default)]
     mappings: HashMap<String, PathBuf>,
+    #[serde(default = "default_search_depth")]
+    max_search_depth: u32,
 }
 
 impl Default for Config {
@@ -146,6 +149,7 @@ impl Default for Config {
             service_name: "dtnbasket".to_string(),
             allowed_dirs: Vec::new(),
             mappings: HashMap::new(),
+            max_search_depth: 3,
         }
     }
 }
@@ -158,25 +162,28 @@ fn default_service_name() -> String {
     "dtnbasket".to_string()
 }
 
+fn default_search_depth() -> u32 {
+    3
+}
+
 use dtn_hdy_utils::basket::*;
+
+const SEARCH_RESULT_INLINE_LIMIT: usize = 50;
 
 // Client fetching logic and security checks
 
 fn build_tls_connector(insecure_tls: bool) -> Result<tokio_rustls::TlsConnector> {
-    let root_store = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let client_config_builder = ClientConfig::builder();
-
     let client_config = if insecure_tls {
-        let mut config = client_config_builder
-            .with_root_certificates(root_store)
+        let mut config = ClientConfig::builder()
+            .with_root_certificates(RootCertStore::empty())
             .with_no_client_auth();
         config
             .dangerous()
             .set_certificate_verifier(Arc::new(SelfSignedVerifier));
         config
     } else {
-        client_config_builder
+        let root_store = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth()
     };
@@ -222,28 +229,24 @@ async fn fetch_gemini(
 
     // Send request
     let request = format!("{}\r\n", full_url);
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     tls_stream.write_all(request.as_bytes()).await?;
     tls_stream.flush().await?;
 
-    // Read response header up to \r\n
+    let mut reader = BufReader::new(tls_stream);
+
+    // Read response header up to \n
     let mut header_bytes = Vec::new();
-    let mut buf = [0u8; 1];
-    loop {
-        let n = tls_stream.read(&mut buf).await?;
-        if n == 0 {
-            return Err(anyhow::anyhow!("Connection closed before header received"));
-        }
-        header_bytes.push(buf[0]);
-        if header_bytes.ends_with(b"\r\n") {
-            break;
-        }
-        if header_bytes.len() > 1026 {
-            return Err(anyhow::anyhow!("Response header too long"));
-        }
+    let n = reader.read_until(b'\n', &mut header_bytes).await?;
+    if n == 0 {
+        return Err(anyhow::anyhow!("Connection closed before header received"));
+    }
+    if header_bytes.len() > 1026 {
+        return Err(anyhow::anyhow!("Response header too long"));
     }
 
-    let header_str = String::from_utf8_lossy(&header_bytes[..header_bytes.len() - 2]);
+    let header_str = String::from_utf8_lossy(&header_bytes);
+    let header_str = header_str.trim_end_matches(&['\r', '\n'][..]);
     let parts: Vec<&str> = header_str.splitn(2, ' ').collect();
     if parts.is_empty() {
         return Err(anyhow::anyhow!("Invalid Gemini response header"));
@@ -274,7 +277,7 @@ async fn fetch_gemini(
             let mut body = Vec::new();
             let mut chunk = [0u8; 4096];
             loop {
-                let n = tls_stream.read(&mut chunk).await?;
+                let n = reader.read(&mut chunk).await?;
                 if n == 0 {
                     break;
                 }
@@ -303,11 +306,7 @@ fn check_file_path(path: &Path, allowed_dirs: &[PathBuf]) -> bool {
         Err(_) => return false,
     };
     for dir in allowed_dirs {
-        if dir
-            .canonicalize()
-            .map(|dir_c| path.starts_with(dir_c))
-            .unwrap_or(false)
-        {
+        if path.starts_with(dir) {
             return true;
         }
     }
@@ -325,31 +324,81 @@ fn guess_mime_type(path: &Path) -> &'static str {
         Some("gif") => "image/gif",
         Some("cbor") => "application/cbor",
         Some("xml") => "application/xml",
+        Some("json") => "application/json",
+        Some("toml") => "application/toml",
+        Some("csv") => "text/csv; charset=utf-8",
+        Some("zip") => "application/zip",
         _ => "application/octet-stream",
     }
 }
 
-fn is_safe_host(host: &str) -> bool {
-    let host = host.to_lowercase();
-    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" {
+fn is_safe_ip(ip: std::net::IpAddr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() {
         return false;
     }
-    if host.starts_with("10.") || host.starts_with("192.168.") {
-        return false;
-    }
-    if host.starts_with("172.") {
-        let is_private_172 = host
-            .split('.')
-            .nth(1)
-            .and_then(|s| s.parse::<u8>().ok())
-            .map(|second_octet| (16..=31).contains(&second_octet))
-            .unwrap_or(false);
-        if is_private_172 {
-            return false;
+    match ip {
+        std::net::IpAddr::V4(v4) => !v4.is_private() && !v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => {
+            // Check if it's an IPv4-mapped IPv6 address
+            if let Some(v4) = v6.to_ipv4() {
+                return !v4.is_loopback()
+                    && !v4.is_unspecified()
+                    && !v4.is_private()
+                    && !v4.is_link_local();
+            }
+            let is_link_local = (v6.segments()[0] & 0xffc0) == 0xfe80;
+            let is_unique_local = (v6.segments()[0] & 0xfe00) == 0xfc00;
+            !is_link_local && !is_unique_local
         }
     }
-    true
 }
+
+async fn is_safe_host(host: &str, port: u16) -> bool {
+    let host_trimmed = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = host_trimmed.parse::<std::net::IpAddr>() {
+        return is_safe_ip(ip);
+    }
+
+    let host_lower = host.to_lowercase();
+    if host_lower == "localhost" {
+        return false;
+    }
+
+    // Resolve domain using tokio::net::lookup_host
+    if let Ok(addrs) = tokio::net::lookup_host(format!("{}:{}", host, port)).await {
+        let mut count = 0;
+        for addr in addrs {
+            count += 1;
+            if !is_safe_ip(addr.ip()) {
+                return false;
+            }
+        }
+        count > 0
+    } else {
+        false
+    }
+}
+
+#[derive(Debug)]
+enum FetchError {
+    PayloadTooLarge,
+    Forbidden(String),
+    NotFound(String),
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PayloadTooLarge => write!(f, "Payload too large"),
+            Self::Forbidden(msg) => write!(f, "Access denied: {}", msg),
+            Self::NotFound(msg) => write!(f, "Not found: {}", msg),
+            Self::Other(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl std::error::Error for FetchError {}
 
 async fn fetch_resource(
     uri: &str,
@@ -357,21 +406,32 @@ async fn fetch_resource(
     connector: &tokio_rustls::TlsConnector,
     config: &Config,
     max_size: u64,
-) -> Result<(Vec<u8>, String)> {
+) -> Result<(Vec<u8>, String), FetchError> {
     let mut current_uri = uri.to_string();
     let mut redirect_count = 0;
 
     loop {
         if current_uri.starts_with("http://") || current_uri.starts_with("https://") {
-            let url = reqwest::Url::parse(&current_uri)?;
-            if let Some(host) = url.host_str().filter(|h| !is_safe_host(h)) {
-                return Err(anyhow::anyhow!(
+            let url = reqwest::Url::parse(&current_uri).map_err(|e| FetchError::Other(e.into()))?;
+            let port = url
+                .port()
+                .unwrap_or(if url.scheme() == "https" { 443 } else { 80 });
+            let host_safe = match url.host_str() {
+                Some(host) => is_safe_host(host, port).await,
+                None => true,
+            };
+            if !host_safe {
+                return Err(FetchError::Forbidden(format!(
                     "Forbidden host (SSRF protection): {}",
-                    host
-                ));
+                    url.host_str().unwrap_or("")
+                )));
             }
 
-            let res = client.get(&current_uri).send().await?;
+            let res = client
+                .get(&current_uri)
+                .send()
+                .await
+                .map_err(|e| FetchError::NotFound(e.to_string()))?;
             let status = res.status();
             if status.is_success() {
                 let mime = res
@@ -386,45 +446,69 @@ async fn fetch_resource(
                     .map(|len| len > max_size)
                     .unwrap_or(false)
                 {
-                    return Err(anyhow::anyhow!("Payload too large"));
+                    return Err(FetchError::PayloadTooLarge);
                 }
 
-                let bytes = res.bytes().await?;
+                let bytes = res.bytes().await.map_err(|e| FetchError::Other(e.into()))?;
                 if bytes.len() as u64 > max_size {
-                    return Err(anyhow::anyhow!("Payload too large"));
+                    return Err(FetchError::PayloadTooLarge);
                 }
                 return Ok((bytes.to_vec(), mime));
             } else if status.is_redirection() {
                 if redirect_count >= 5 {
-                    return Err(anyhow::anyhow!("Too many redirects"));
+                    return Err(FetchError::Other(anyhow::anyhow!("Too many redirects")));
                 }
                 redirect_count += 1;
                 let location = res
                     .headers()
                     .get(reqwest::header::LOCATION)
                     .and_then(|h| h.to_str().ok())
-                    .ok_or_else(|| anyhow::anyhow!("Redirect without Location header"))?;
+                    .ok_or_else(|| {
+                        FetchError::Other(anyhow::anyhow!("Redirect without Location header"))
+                    })?;
 
-                let base = reqwest::Url::parse(&current_uri)?;
-                let resolved = base.join(location)?;
+                let base =
+                    reqwest::Url::parse(&current_uri).map_err(|e| FetchError::Other(e.into()))?;
+                let resolved = base
+                    .join(location)
+                    .map_err(|e| FetchError::Other(e.into()))?;
 
                 let scheme = resolved.scheme();
                 if scheme != "http" && scheme != "https" && scheme != "gemini" {
-                    return Err(anyhow::anyhow!("Forbidden redirect scheme: {}", scheme));
+                    return Err(FetchError::Forbidden(format!(
+                        "Forbidden redirect scheme: {}",
+                        scheme
+                    )));
+                }
+
+                let port = resolved.port().unwrap_or(if resolved.scheme() == "https" {
+                    443
+                } else {
+                    80
+                });
+                let host_safe = match resolved.host_str() {
+                    Some(host) => is_safe_host(host, port).await,
+                    None => true,
+                };
+                if !host_safe {
+                    return Err(FetchError::Forbidden(format!(
+                        "Forbidden redirect host (SSRF protection): {}",
+                        resolved.host_str().unwrap_or("")
+                    )));
                 }
 
                 current_uri = resolved.to_string();
                 continue;
             } else {
-                return Err(anyhow::anyhow!("HTTP error: {}", status));
+                return Err(FetchError::NotFound(format!("HTTP error: {}", status)));
             }
         } else if current_uri.starts_with("gemini://") {
-            let (host, _, _) = parse_gemini_url(&current_uri)?;
-            if !is_safe_host(&host) {
-                return Err(anyhow::anyhow!(
+            let (host, port, _) = parse_gemini_url(&current_uri).map_err(FetchError::Other)?;
+            if !is_safe_host(&host, port).await {
+                return Err(FetchError::Forbidden(format!(
                     "Forbidden host (SSRF protection): {}",
                     host
-                ));
+                )));
             }
 
             match fetch_gemini(&current_uri, connector, max_size).await {
@@ -433,51 +517,74 @@ async fn fetch_resource(
                     let err_msg = e.to_string();
                     if let Some(redirect_meta) = err_msg.strip_prefix("REDIRECT: ") {
                         if redirect_count >= 5 {
-                            return Err(anyhow::anyhow!("Too many redirects"));
+                            return Err(FetchError::Other(anyhow::anyhow!("Too many redirects")));
                         }
                         redirect_count += 1;
-                        let base = reqwest::Url::parse(&current_uri)?;
-                        let resolved = base.join(redirect_meta.trim())?;
+                        let base = reqwest::Url::parse(&current_uri)
+                            .map_err(|e| FetchError::Other(e.into()))?;
+                        let resolved = base
+                            .join(redirect_meta.trim())
+                            .map_err(|e| FetchError::Other(e.into()))?;
 
                         let scheme = resolved.scheme();
                         if scheme != "http" && scheme != "https" && scheme != "gemini" {
-                            return Err(anyhow::anyhow!("Forbidden redirect scheme: {}", scheme));
+                            return Err(FetchError::Forbidden(format!(
+                                "Forbidden redirect scheme: {}",
+                                scheme
+                            )));
+                        }
+
+                        let port = resolved.port().unwrap_or(1965);
+                        let host_safe = match resolved.host_str() {
+                            Some(host) => is_safe_host(host, port).await,
+                            None => true,
+                        };
+                        if !host_safe {
+                            return Err(FetchError::Forbidden(format!(
+                                "Forbidden redirect host (SSRF protection): {}",
+                                resolved.host_str().unwrap_or("")
+                            )));
                         }
 
                         current_uri = resolved.to_string();
                         continue;
+                    } else if err_msg.contains("Payload too large") {
+                        return Err(FetchError::PayloadTooLarge);
                     } else {
-                        return Err(e);
+                        return Err(FetchError::NotFound(err_msg));
                     }
                 }
             }
         } else if let Some(file_path_str) = current_uri.strip_prefix("file://") {
             let path = PathBuf::from(file_path_str);
             if !check_file_path(&path, &config.allowed_dirs) {
-                return Err(anyhow::anyhow!(
+                return Err(FetchError::Forbidden(format!(
                     "Access denied or file not allowed: {}",
                     file_path_str
-                ));
+                )));
             }
-            let bytes = std::fs::read(&path)?;
+            let bytes = std::fs::read(&path).map_err(|e| FetchError::NotFound(e.to_string()))?;
             if bytes.len() as u64 > max_size {
-                return Err(anyhow::anyhow!("Payload too large"));
+                return Err(FetchError::PayloadTooLarge);
             }
             let mime = guess_mime_type(&path).to_string();
             return Ok((bytes, mime));
         } else if let Some(mapped_path) = config.mappings.get(&current_uri) {
-            let canonical = mapped_path.canonicalize()?;
-            let bytes = std::fs::read(&canonical)?;
+            let canonical = mapped_path
+                .canonicalize()
+                .map_err(|e| FetchError::NotFound(e.to_string()))?;
+            let bytes =
+                std::fs::read(&canonical).map_err(|e| FetchError::NotFound(e.to_string()))?;
             if bytes.len() as u64 > max_size {
-                return Err(anyhow::anyhow!("Payload too large"));
+                return Err(FetchError::PayloadTooLarge);
             }
             let mime = guess_mime_type(&canonical).to_string();
             return Ok((bytes, mime));
         } else {
-            return Err(anyhow::anyhow!(
+            return Err(FetchError::NotFound(format!(
                 "Unsupported URI scheme or mapping: {}",
                 current_uri
-            ));
+            )));
         }
     }
 }
@@ -506,7 +613,7 @@ fn perform_search(query: &str, config: &Config) -> Vec<(String, PathBuf)> {
     for dir in &config.allowed_dirs {
         let mut dirs_to_visit = vec![(dir.clone(), 0)];
         while let Some((current_dir, depth)) = dirs_to_visit.pop() {
-            if depth > 3 {
+            if depth > config.max_search_depth {
                 continue;
             }
             let read_dir = match std::fs::read_dir(&current_dir) {
@@ -575,15 +682,14 @@ fn compile_list_document(query: &str, results: &[(String, PathBuf)]) -> String {
 
         let mime = guess_mime_type(path);
 
-        doc.push_str("---\n");
-        doc.push_str(&format!("Title: {}\n", filename));
-        doc.push_str("Author: Local System Proxy\n");
-        doc.push_str(&format!("MIME: {}\n", mime));
-        doc.push_str(&format!("Size: {}\n", size));
-        doc.push_str(&format!("POSIX Date: {}\n", posix_date));
-        doc.push_str(&format!("SHA-256: {}\n", hash_hex));
-        doc.push_str(&format!("URI: {}\n", uri));
-        doc.push_str("---\n");
+        doc.push_str(&format!("### {}\n\n", filename));
+        doc.push_str(&format!("- **Title**: {}\n", filename));
+        doc.push_str("- **Author**: Local System Proxy\n");
+        doc.push_str(&format!("- **MIME**: {}\n", mime));
+        doc.push_str(&format!("- **Size**: {} bytes\n", size));
+        doc.push_str(&format!("- **POSIX Date**: {}\n", posix_date));
+        doc.push_str(&format!("- **SHA-256**: {}\n", hash_hex));
+        doc.push_str(&format!("- **URI**: {}\n\n", uri));
     }
     doc
 }
@@ -615,7 +721,8 @@ impl BasketService {
         sign_key_file: Option<String>,
         security_source: Option<String>,
     ) -> Result<Arc<Self>> {
-        let mut client_builder = reqwest::Client::builder();
+        let mut client_builder =
+            reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
         if config.insecure_tls {
             client_builder = client_builder
                 .danger_accept_invalid_certs(true)
@@ -702,7 +809,7 @@ impl BasketService {
                         Err(e) => {
                             item_responses.push(ItemResponse {
                                 item_idx,
-                                coap_status: 160,
+                                coap_status: coap_status::INTERNAL_SERVER_ERROR,
                                 metadata: None,
                                 diagnostic: Some(e.to_string()),
                             });
@@ -716,7 +823,7 @@ impl BasketService {
                     Err(e) => {
                         item_responses.push(ItemResponse {
                             item_idx,
-                            coap_status: 160,
+                            coap_status: coap_status::INTERNAL_SERVER_ERROR,
                             metadata: None,
                             diagnostic: Some(e.to_string()),
                         });
@@ -734,7 +841,7 @@ impl BasketService {
                         Err(e) => {
                             item_responses.push(ItemResponse {
                                 item_idx,
-                                coap_status: 160,
+                                coap_status: coap_status::INTERNAL_SERVER_ERROR,
                                 metadata: None,
                                 diagnostic: Some(e.to_string()),
                             });
@@ -753,7 +860,11 @@ impl BasketService {
                         }
                     };
 
-                    let status = if success { 66 } else { 132 };
+                    let status = if success {
+                        coap_status::CHANGED
+                    } else {
+                        coap_status::NOT_FOUND
+                    };
 
                     item_responses.push(ItemResponse {
                         item_idx,
@@ -779,7 +890,7 @@ impl BasketService {
                         Err(e) => {
                             item_responses.push(ItemResponse {
                                 item_idx,
-                                coap_status: 160,
+                                coap_status: coap_status::INTERNAL_SERVER_ERROR,
                                 metadata: None,
                                 diagnostic: Some(e.to_string()),
                             });
@@ -789,7 +900,7 @@ impl BasketService {
                 _ => {
                     item_responses.push(ItemResponse {
                         item_idx,
-                        coap_status: 132,
+                        coap_status: coap_status::NOT_FOUND,
                         metadata: None,
                         diagnostic: Some(format!("Unsupported operation: {}", item.op)),
                     });
@@ -819,13 +930,13 @@ impl BasketService {
             .get()
             .ok_or_else(|| anyhow::anyhow!("Sink not registered"))?;
 
-        let (_control_bundle, control_bin) = Builder::new(local_eid.clone(), reply_dest.clone())
+        let (control_bundle, control_bin) = Builder::new(local_eid.clone(), reply_dest.clone())
             .with_payload(cbor_bytes.into())
             .with_lifetime(std::time::Duration::from_secs(default_lifetime))
             .build(CreationTimestamp::now())
             .map_err(|e| anyhow::anyhow!("Failed to build control bundle: {e}"))?;
 
-        let (_, control_bin_signed) = self.maybe_sign(control_bin.into_vec())?;
+        let (_, control_bin_signed) = self.maybe_sign(&control_bundle, control_bin.into_vec())?;
         sink.send(Bytes::from(control_bin_signed)).await?;
 
         // Send raw content bundles
@@ -836,7 +947,7 @@ impl BasketService {
                 .build(CreationTimestamp::now())
                 .map_err(|e| anyhow::anyhow!("Failed to build raw content bundle: {e}"))?;
 
-            let (_, raw_bin_signed) = self.maybe_sign(raw_bin.into_vec())?;
+            let (_, raw_bin_signed) = self.maybe_sign(&raw_bundle, raw_bin.into_vec())?;
 
             if self.verbose {
                 eprintln!(
@@ -852,42 +963,27 @@ impl BasketService {
         Ok(())
     }
 
-    fn maybe_sign(&self, binbundle: Vec<u8>) -> Result<(hardy_bpv7::bundle::Bundle, Vec<u8>)> {
-        if self.sign_key.is_some() || self.sign_key_file.is_some() {
-            let key_mat = dtn_hdy_utils::security::load_key(
-                self.sign_key.as_deref(),
-                self.sign_key_file.as_deref(),
-            )?;
-            let sec_source = if let Some(ref sec_str) = self.security_source {
-                Some(
-                    sec_str
-                        .parse::<Eid>()
-                        .map_err(|e| anyhow::anyhow!("Invalid security source EID: {e}"))?,
-                )
-            } else {
-                None
-            };
-            if self.verbose {
-                eprintln!("Signing bundle with HMAC-SHA256...");
-            }
-            let (signed_bundle, signed_binbundle) =
-                dtn_hdy_utils::security::sign_bundle(&binbundle, &key_mat, sec_source)?;
-            Ok((signed_bundle, signed_binbundle))
-        } else {
-            let parsed =
-                hardy_bpv7::bundle::ParsedBundle::parse(&binbundle, hardy_bpv7::bpsec::no_keys)
-                    .map_err(|e| anyhow::anyhow!("Failed to parse bundle: {e}"))?;
-            Ok((parsed.bundle, binbundle))
-        }
+    fn maybe_sign(
+        &self,
+        bundle: &hardy_bpv7::bundle::Bundle,
+        binbundle: Vec<u8>,
+    ) -> Result<(hardy_bpv7::bundle::Bundle, Vec<u8>)> {
+        dtn_hdy_utils::security::maybe_sign_bundle(
+            bundle.clone(),
+            binbundle,
+            self.sign_key.as_deref(),
+            self.sign_key_file.as_deref(),
+            self.security_source.as_deref(),
+            self.verbose,
+        )
     }
 
-    async fn handle_get(
+    async fn fetch_and_hash_item(
         &self,
         item: &RequestItem,
         item_idx: u64,
-        default_lifetime: u64,
         cancel_rx: &mut tokio::sync::watch::Receiver<bool>,
-    ) -> Result<(ItemResponse, Option<(Vec<u8>, Vec<u8>, u64)>)> {
+    ) -> Result<(ItemResponse, Option<(Vec<u8>, Vec<u8>)>)> {
         let max_size = item.max_size.unwrap_or(50 * 1024 * 1024);
 
         let fetch_fut = fetch_resource(
@@ -908,13 +1004,11 @@ impl BasketService {
         let (body, mime) = match fetch_res {
             Ok(res) => res,
             Err(e) => {
-                let err_msg = e.to_string();
-                let status = if err_msg.contains("Payload too large") {
-                    141
-                } else if err_msg.contains("Access denied") || err_msg.contains("not allowed") {
-                    131
-                } else {
-                    132
+                let status = match e {
+                    FetchError::PayloadTooLarge => coap_status::REQUEST_ENTITY_TOO_LARGE,
+                    FetchError::Forbidden(_) => coap_status::FORBIDDEN,
+                    FetchError::NotFound(_) => coap_status::NOT_FOUND,
+                    FetchError::Other(_) => coap_status::NOT_FOUND,
                 };
 
                 return Ok((
@@ -922,7 +1016,7 @@ impl BasketService {
                         item_idx,
                         coap_status: status,
                         metadata: None,
-                        diagnostic: Some(err_msg),
+                        diagnostic: Some(e.to_string()),
                     },
                     None,
                 ));
@@ -937,7 +1031,7 @@ impl BasketService {
                 return Ok((
                     ItemResponse {
                         item_idx,
-                        coap_status: 134,
+                        coap_status: coap_status::NOT_ACCEPTABLE,
                         metadata: None,
                         diagnostic: Some(format!("MIME type {} not accepted", mime)),
                     },
@@ -967,8 +1061,6 @@ impl BasketService {
             None
         };
 
-        let lifetime = item.lifetime_override.unwrap_or(default_lifetime);
-
         let metadata = ItemMetadata {
             hash: hash.clone(),
             size: Some(body.len() as u64),
@@ -980,12 +1072,26 @@ impl BasketService {
         Ok((
             ItemResponse {
                 item_idx,
-                coap_status: 69,
+                coap_status: coap_status::CONTENT,
                 metadata: Some(metadata),
                 diagnostic: None,
             },
-            Some((body, hash, lifetime)),
+            Some((body, hash)),
         ))
+    }
+
+    async fn handle_get(
+        &self,
+        item: &RequestItem,
+        item_idx: u64,
+        default_lifetime: u64,
+        cancel_rx: &mut tokio::sync::watch::Receiver<bool>,
+    ) -> Result<(ItemResponse, Option<(Vec<u8>, Vec<u8>, u64)>)> {
+        let (item_resp, body_hash_opt) =
+            self.fetch_and_hash_item(item, item_idx, cancel_rx).await?;
+        let lifetime = item.lifetime_override.unwrap_or(default_lifetime);
+        let bundle_to_send = body_hash_opt.map(|(body, hash)| (body, hash, lifetime));
+        Ok((item_resp, bundle_to_send))
     }
 
     async fn handle_check(
@@ -994,95 +1100,11 @@ impl BasketService {
         item_idx: u64,
         cancel_rx: &mut tokio::sync::watch::Receiver<bool>,
     ) -> Result<ItemResponse> {
-        let max_size = item.max_size.unwrap_or(50 * 1024 * 1024);
-
-        let fetch_fut = fetch_resource(
-            &item.uri,
-            &self.client,
-            &self.tls_connector,
-            &self.config,
-            max_size,
-        );
-
-        let fetch_res = tokio::select! {
-            res = fetch_fut => res,
-            _ = cancel_rx.changed() => {
-                return Err(anyhow::anyhow!("Operation cancelled"));
-            }
-        };
-
-        let (body, mime) = match fetch_res {
-            Ok(res) => res,
-            Err(e) => {
-                let err_msg = e.to_string();
-                let status = if err_msg.contains("Payload too large") {
-                    141
-                } else if err_msg.contains("Access denied") || err_msg.contains("not allowed") {
-                    131
-                } else {
-                    132
-                };
-
-                return Ok(ItemResponse {
-                    item_idx,
-                    coap_status: status,
-                    metadata: None,
-                    diagnostic: Some(err_msg),
-                });
-            }
-        };
-
-        if let Some(formats) = item.accepted_formats.as_ref().filter(|f| !f.is_empty()) {
-            let matches = formats
-                .iter()
-                .any(|f| if f == "*/*" { true } else { mime.contains(f) });
-            if !matches {
-                return Ok(ItemResponse {
-                    item_idx,
-                    coap_status: 134,
-                    metadata: None,
-                    diagnostic: Some(format!("MIME type {} not accepted", mime)),
-                });
-            }
-        }
-
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(&body);
-        let hash = hasher.finalize().to_vec();
-
-        let last_modified = if let Some(path_str) = item.uri.strip_prefix("file://") {
-            std::fs::metadata(path_str)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-        } else if let Some(path) = self.config.mappings.get(&item.uri) {
-            std::fs::metadata(path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-        } else {
-            None
-        };
-
-        let metadata = ItemMetadata {
-            hash,
-            size: Some(body.len() as u64),
-            mime_type: Some(mime),
-            uri: Some(item.uri.clone()),
-            last_modified,
-        };
-
-        Ok(ItemResponse {
-            item_idx,
-            coap_status: 69,
-            metadata: Some(metadata),
-            diagnostic: None,
-        })
+        let (item_resp, _) = self.fetch_and_hash_item(item, item_idx, cancel_rx).await?;
+        Ok(item_resp)
     }
 
+    #[allow(clippy::type_complexity)]
     async fn handle_search(
         &self,
         item: &RequestItem,
@@ -1092,7 +1114,11 @@ impl BasketService {
     ) -> Result<(Vec<ItemResponse>, Vec<(Vec<u8>, Vec<u8>, u64)>)> {
         let max_size = item.max_size.unwrap_or(50 * 1024 * 1024);
 
-        let search_results = perform_search(&item.uri, &self.config);
+        let query_clone = item.uri.clone();
+        let config_clone = self.config.clone();
+        let search_results =
+            tokio::task::spawn_blocking(move || perform_search(&query_clone, &config_clone))
+                .await?;
 
         let mut item_responses = Vec::new();
         let mut raw_bundles_to_send = Vec::new();
@@ -1102,21 +1128,26 @@ impl BasketService {
         if m == 0 {
             item_responses.push(ItemResponse {
                 item_idx,
-                coap_status: 132,
+                coap_status: coap_status::NOT_FOUND,
                 metadata: None,
                 diagnostic: Some("No matching resources found".to_string()),
             });
             return Ok((item_responses, raw_bundles_to_send));
         }
 
-        if m > 50 {
+        if m > SEARCH_RESULT_INLINE_LIMIT {
             if self.verbose {
                 eprintln!(
-                    "Search found {} matches, exceeding 50. Returning LIST index document.",
-                    m
+                    "Search found {} matches, exceeding {}. Returning LIST index document.",
+                    m, SEARCH_RESULT_INLINE_LIMIT
                 );
             }
-            let markdown_doc = compile_list_document(&item.uri, &search_results);
+            let query_clone = item.uri.clone();
+            let results_clone = search_results.clone();
+            let markdown_doc = tokio::task::spawn_blocking(move || {
+                compile_list_document(&query_clone, &results_clone)
+            })
+            .await?;
             let doc_bytes = markdown_doc.into_bytes();
 
             use sha2::{Digest, Sha256};
@@ -1141,79 +1172,99 @@ impl BasketService {
 
             item_responses.push(ItemResponse {
                 item_idx,
-                coap_status: 69,
+                coap_status: coap_status::CONTENT,
                 metadata: Some(metadata),
-                diagnostic: Some("Result size exceeded 50, index document returned".to_string()),
+                diagnostic: Some(format!(
+                    "Result size exceeded {}, index document returned",
+                    SEARCH_RESULT_INLINE_LIMIT
+                )),
             });
 
             raw_bundles_to_send.push((doc_bytes, hash, lifetime));
             return Ok((item_responses, raw_bundles_to_send));
         }
 
-        for (uri, path) in search_results {
-            if *cancel_rx.borrow() {
-                break;
-            }
+        let have_hashes_clone = item.have_hashes.clone();
+        let lifetime_override = item.lifetime_override;
+        let cancel_rx_clone = cancel_rx.clone();
 
-            let bytes = match std::fs::read(&path) {
-                Ok(b) => b,
-                Err(_) => continue,
-            };
+        let (mut inline_resps, inline_raws) = tokio::task::spawn_blocking(
+            move || -> Result<(Vec<ItemResponse>, Vec<(Vec<u8>, Vec<u8>, u64)>)> {
+                let mut item_responses = Vec::new();
+                let mut raw_bundles_to_send = Vec::new();
 
-            if bytes.len() as u64 > max_size {
-                item_responses.push(ItemResponse {
-                    item_idx,
-                    coap_status: 141,
-                    metadata: None,
-                    diagnostic: Some(format!("Resource {} exceeds max size limit", uri)),
-                });
-                continue;
-            }
-
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(&bytes);
-            let hash = hasher.finalize().to_vec();
-
-            let mut already_owned = false;
-            if let Some(ref have) = item.have_hashes {
-                for h in have {
-                    if hash.starts_with(h) {
-                        already_owned = true;
+                for (uri, path) in search_results {
+                    if *cancel_rx_clone.borrow() {
                         break;
                     }
+
+                    let bytes = match std::fs::read(&path) {
+                        Ok(b) => b,
+                        Err(_) => continue,
+                    };
+
+                    if bytes.len() as u64 > max_size {
+                        item_responses.push(ItemResponse {
+                            item_idx,
+                            coap_status: coap_status::REQUEST_ENTITY_TOO_LARGE,
+                            metadata: None,
+                            diagnostic: Some(format!("Resource {} exceeds max size limit", uri)),
+                        });
+                        continue;
+                    }
+
+                    use sha2::{Digest, Sha256};
+                    let mut hasher = Sha256::new();
+                    hasher.update(&bytes);
+                    let hash = hasher.finalize().to_vec();
+
+                    let mut already_owned = false;
+                    if let Some(ref have) = have_hashes_clone {
+                        for h in have {
+                            if hash.starts_with(h) {
+                                already_owned = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    let mime = guess_mime_type(&path).to_string();
+
+                    let last_modified = path
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs());
+
+                    let metadata = ItemMetadata {
+                        hash: hash.clone(),
+                        size: Some(bytes.len() as u64),
+                        mime_type: Some(mime),
+                        uri: Some(uri.clone()),
+                        last_modified,
+                    };
+
+                    item_responses.push(ItemResponse {
+                        item_idx,
+                        coap_status: coap_status::CONTENT,
+                        metadata: Some(metadata),
+                        diagnostic: None,
+                    });
+
+                    if !already_owned {
+                        let lifetime = lifetime_override.unwrap_or(default_lifetime);
+                        raw_bundles_to_send.push((bytes, hash, lifetime));
+                    }
                 }
-            }
 
-            let mime = guess_mime_type(&path).to_string();
+                Ok((item_responses, raw_bundles_to_send))
+            },
+        )
+        .await??;
 
-            let last_modified = path
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs());
-
-            let metadata = ItemMetadata {
-                hash: hash.clone(),
-                size: Some(bytes.len() as u64),
-                mime_type: Some(mime),
-                uri: Some(uri.clone()),
-                last_modified,
-            };
-
-            item_responses.push(ItemResponse {
-                item_idx,
-                coap_status: 69,
-                metadata: Some(metadata),
-                diagnostic: None,
-            });
-
-            if !already_owned {
-                let lifetime = item.lifetime_override.unwrap_or(default_lifetime);
-                raw_bundles_to_send.push((bytes, hash, lifetime));
-            }
-        }
+        item_responses.append(&mut inline_resps);
+        raw_bundles_to_send.extend(inline_raws);
 
         Ok((item_responses, raw_bundles_to_send))
     }
@@ -1225,13 +1276,17 @@ impl BasketService {
         default_lifetime: u64,
         _cancel_rx: &mut tokio::sync::watch::Receiver<bool>,
     ) -> Result<(ItemResponse, Option<(Vec<u8>, Vec<u8>, u64)>)> {
-        let search_results = perform_search(&item.uri, &self.config);
+        let query_clone = item.uri.clone();
+        let config_clone = self.config.clone();
+        let search_results =
+            tokio::task::spawn_blocking(move || perform_search(&query_clone, &config_clone))
+                .await?;
 
         if search_results.is_empty() {
             return Ok((
                 ItemResponse {
                     item_idx,
-                    coap_status: 132,
+                    coap_status: coap_status::NOT_FOUND,
                     metadata: None,
                     diagnostic: Some("No matching resources found".to_string()),
                 },
@@ -1239,7 +1294,12 @@ impl BasketService {
             ));
         }
 
-        let markdown_doc = compile_list_document(&item.uri, &search_results);
+        let query_clone = item.uri.clone();
+        let results_clone = search_results.clone();
+        let markdown_doc = tokio::task::spawn_blocking(move || {
+            compile_list_document(&query_clone, &results_clone)
+        })
+        .await?;
         let doc_bytes = markdown_doc.into_bytes();
 
         use sha2::{Digest, Sha256};
@@ -1265,18 +1325,15 @@ impl BasketService {
         Ok((
             ItemResponse {
                 item_idx,
-                coap_status: 69,
+                coap_status: coap_status::CONTENT,
                 metadata: Some(metadata),
                 diagnostic: None,
             },
             Some((doc_bytes, hash, lifetime)),
         ))
     }
-}
 
-#[async_trait]
-impl BpaService for BasketService {
-    async fn on_register(&self, source: &Eid, sink: Box<dyn ServiceSink>) {
+    pub async fn on_register(&self, source: &Eid, sink: Box<dyn ServiceSink>) {
         if self.verbose {
             eprintln!(
                 "Basket service registered successfully with EID: {}",
@@ -1287,68 +1344,12 @@ impl BpaService for BasketService {
         let _ = self.sink.set(sink);
     }
 
-    async fn on_unregister(&self) {
-        if self.verbose {
-            eprintln!("Basket service unregistered");
-        }
+    pub async fn on_unregister(&self) {
+        eprintln!("Error: Basket service unregistered (connection lost). Exiting.");
+        std::process::exit(1);
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
-        let (source, _payload) =
-            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
-                Ok(parsed) => {
-                    let payload_bytes = parsed
-                        .bundle
-                        .blocks
-                        .get(&1)
-                        .and_then(|b| data.get(b.payload_range()))
-                        .map(|bytes| bytes.to_vec())
-                        .unwrap_or_else(|| data.to_vec());
-                    (parsed.bundle.id.source, payload_bytes)
-                }
-                Err(_) => (Eid::Null, data.to_vec()),
-            };
-
-        if self.policy != VerifyPolicy::Ignore {
-            let res = verify_bundle(&data, &self.keystore);
-            match res {
-                VerifyResult::Valid => {
-                    if self.verbose {
-                        eprintln!("Signature verified successfully for source {}", source);
-                    }
-                }
-                VerifyResult::Invalid(reason) => {
-                    eprintln!(
-                        "WARNING: Signature verification failed for {}: {}",
-                        source, reason
-                    );
-                    if self.policy == VerifyPolicy::Strict {
-                        eprintln!(
-                            "Basket request bundle dropped due to strict verification policy."
-                        );
-                        return;
-                    }
-                }
-                VerifyResult::Unsigned => {
-                    if self.policy == VerifyPolicy::Strict {
-                        eprintln!(
-                            "WARNING: Unsigned basket request bundle received from {}. Dropped due to strict verification policy.",
-                            source
-                        );
-                        return;
-                    } else if self.verbose {
-                        eprintln!("Received unsigned basket request bundle from {}", source);
-                    }
-                }
-            }
-        }
-
-        // Clone Arc self to spawn task
-        // But self is passed as Arc inside on_receive?
-        // Since BpaService is implemented on Arc<BasketService>, let's make sure it handles Arc reference
-    }
-
-    async fn on_status_notify(
+    pub async fn on_status_notify(
         &self,
         _bundle_id: &hardy_bpv7::bundle::Id,
         _from: &Eid,
@@ -1502,26 +1503,35 @@ fn load_config(explicit_path: Option<PathBuf>, verbose: bool) -> Config {
         }
     };
 
-    // Resolve relative paths in allowed_dirs
+    // Resolve relative paths in allowed_dirs and canonicalize all allowed_dirs
     let parent = config_file.as_ref().and_then(|p| p.parent());
-    for dir in &mut config.allowed_dirs {
-        if dir.is_relative() {
+    let mut canonical_dirs = Vec::new();
+    for dir in &config.allowed_dirs {
+        let abs_path = if dir.is_relative() {
+            let mut resolved = None;
             if let Some(p) = parent {
-                let abs_path = p.join(&dir);
-                if abs_path.exists() {
-                    *dir = abs_path;
-                    continue;
+                let p_join = p.join(dir);
+                if p_join.exists() {
+                    resolved = Some(p_join);
                 }
             }
-            if let Some(abs_cwd) = std::env::current_dir()
-                .ok()
-                .map(|cwd| cwd.join(&dir))
-                .filter(|p| p.exists())
-            {
-                *dir = abs_cwd;
+            if resolved.is_none() {
+                resolved = std::env::current_dir()
+                    .ok()
+                    .map(|cwd| cwd.join(dir))
+                    .filter(|p| p.exists());
             }
+            resolved.unwrap_or_else(|| dir.clone())
+        } else {
+            dir.clone()
+        };
+        if let Ok(canon) = abs_path.canonicalize() {
+            canonical_dirs.push(canon);
+        } else {
+            canonical_dirs.push(abs_path);
         }
     }
+    config.allowed_dirs = canonical_dirs;
 
     config
 }
@@ -1535,27 +1545,17 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    let config = load_config(args.config, args.verbose);
+
     // Resolve port using convention (check env vars first)
     let localhost = if args.ipv6 { "[::1]" } else { "127.0.0.1" };
-    let port_str = if let Ok(env_port) = std::env::var("HARDY_GRPC_PORT") {
-        env_port
-    } else if let Ok(env_port) = std::env::var("DTN_WEB_PORT") {
-        env_port
-    } else if let Some(cli_port) = args.port {
-        cli_port.to_string()
-    } else {
-        // Load config to check its port
-        let cfg = load_config(args.config.clone(), args.verbose);
-        cfg.bpa_grpc_port.to_string()
-    };
+    let port_str = resolve_grpc_port(args.port.or(Some(config.bpa_grpc_port)));
 
     let grpc_addr = format!("http://{}:{}", localhost, port_str);
 
     if args.verbose {
         eprintln!("Connecting to Hardy BPA at {}", grpc_addr);
     }
-
-    let config = load_config(args.config, args.verbose);
 
     let mut keystore = KeyStore::load_default_or(args.keystore.as_deref())?;
     if args.verify_key.is_some() || args.verify_key_file.is_some() {
@@ -1658,8 +1658,8 @@ mod tests {
         let results = vec![("file:///path/guide.pdf".to_string(), file1.clone())];
         let doc = compile_list_document("guide", &results);
         assert!(doc.contains("# Bibliographic Index: guide"));
-        assert!(doc.contains("Title: guide.pdf"));
-        assert!(doc.contains("MIME: application/pdf"));
+        assert!(doc.contains("Title**: guide.pdf"));
+        assert!(doc.contains("MIME**: application/pdf"));
     }
 
     #[test]
@@ -1734,5 +1734,29 @@ mod tests {
                 .unwrap(),
             "/tmp/test.txt"
         );
+    }
+
+    #[tokio::test]
+    async fn test_is_safe_ip_and_host() {
+        assert!(!is_safe_ip("127.0.0.1".parse().unwrap()));
+        assert!(!is_safe_ip("0.0.0.0".parse().unwrap()));
+        assert!(!is_safe_ip("192.168.1.1".parse().unwrap()));
+        assert!(!is_safe_ip("10.0.0.1".parse().unwrap()));
+        assert!(!is_safe_ip("::1".parse().unwrap()));
+        assert!(!is_safe_ip("::".parse().unwrap()));
+        assert!(!is_safe_ip("fe80::1".parse().unwrap()));
+        assert!(!is_safe_ip("fc00::1".parse().unwrap()));
+
+        assert!(!is_safe_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(!is_safe_ip("::ffff:192.168.1.1".parse().unwrap()));
+
+        assert!(is_safe_ip("8.8.8.8".parse().unwrap()));
+        assert!(is_safe_ip("2001:4860:4860::8888".parse().unwrap()));
+
+        assert!(!is_safe_host("127.0.0.1", 80).await);
+        assert!(!is_safe_host("[::ffff:127.0.0.1]", 80).await);
+        assert!(is_safe_host("8.8.8.8", 80).await);
+
+        assert!(!is_safe_host("localhost", 80).await);
     }
 }

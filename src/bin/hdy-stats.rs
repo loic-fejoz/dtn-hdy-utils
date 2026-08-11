@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use clap::Parser;
+use dtn_hdy_utils::resolve_grpc_port;
 use hardy_bpa::async_trait;
 use hardy_bpa::bpa::BpaRegistration;
 use hardy_bpa::services::{Service as BpaService, ServiceSink, StatusNotify};
@@ -19,8 +20,8 @@ use tokio::sync::OnceCell;
 #[command(author, version, about = "DTN statistics collector and responder for Hardy BPA", long_about = None)]
 struct Args {
     /// Local gRPC port of Hardy BPA (default = 50051)
-    #[arg(short, long, default_value_t = 50051)]
-    port: u16,
+    #[arg(short, long)]
+    port: Option<u16>,
 
     /// Use IPv6 for connecting to Hardy
     #[arg(short = '6', long)]
@@ -244,9 +245,8 @@ impl BpaService for StatsApp {
     }
 
     async fn on_unregister(&self) {
-        if self.verbose {
-            eprintln!("Stats application unregistered");
-        }
+        eprintln!("Error: Stats application unregistered (connection lost). Exiting.");
+        std::process::exit(1);
     }
 
     async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
@@ -341,45 +341,74 @@ impl BpaService for StatsApp {
 
 async fn tail_file(path: PathBuf, tx: tokio::sync::mpsc::Sender<String>) {
     let mut offset = 0;
+    let mut last_inode = 0;
     loop {
-        let metadata = match std::fs::metadata(&path) {
-            Ok(m) => m,
-            Err(_) => {
+        let path_clone = path.clone();
+        let current_offset = offset;
+        let current_inode = last_inode;
+
+        let result = tokio::task::spawn_blocking(move || -> Result<(Vec<String>, u64, u64), ()> {
+            let metadata = std::fs::metadata(&path_clone).map_err(|_| ())?;
+            let len = metadata.len();
+
+            #[cfg(unix)]
+            use std::os::unix::fs::MetadataExt;
+
+            #[cfg(unix)]
+            let inode = metadata.ino();
+            #[cfg(not(unix))]
+            let inode = 0;
+
+            let mut new_offset = current_offset;
+            let mut rotated = len < new_offset;
+            #[cfg(unix)]
+            if current_inode != 0 && inode != current_inode {
+                rotated = true;
+            }
+
+            if rotated {
+                new_offset = 0; // Rotated
+            }
+            let mut lines = Vec::new();
+            let file_opt = if len > new_offset {
+                std::fs::File::open(&path_clone).ok()
+            } else {
+                None
+            };
+            if let Some(mut file) = file_opt {
+                use std::io::{BufRead, BufReader, Seek, SeekFrom};
+                if file.seek(SeekFrom::Start(new_offset)).is_ok() {
+                    let reader = BufReader::new(file);
+                    for line_result in reader.lines() {
+                        if let Ok(line) = line_result {
+                            lines.push(line);
+                        } else {
+                            break;
+                        }
+                    }
+                    new_offset = len;
+                }
+            }
+            Ok((lines, new_offset, inode))
+        })
+        .await;
+
+        match result {
+            Ok(Ok((lines, new_offset, inode))) => {
+                offset = new_offset;
+                last_inode = inode;
+                for line in lines {
+                    if tx.send(line).await.is_err() {
+                        return; // receiver dropped
+                    }
+                }
+            }
+            _ => {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 continue;
             }
-        };
-        let len = metadata.len();
-        if len < offset {
-            offset = 0; // Rotated
         }
-        if len > offset {
-            match std::fs::File::open(&path) {
-                Ok(mut file) => {
-                    use std::io::{BufRead, BufReader, Seek, SeekFrom};
-                    if let Err(e) = file.seek(SeekFrom::Start(offset)) {
-                        eprintln!("Failed to seek in log file: {}", e);
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                        continue;
-                    }
-                    let reader = BufReader::new(file);
-                    for line_result in reader.lines() {
-                        match line_result {
-                            Ok(line) => {
-                                let _ = tx.send(line).await;
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    offset = len;
-                }
-                Err(e) => {
-                    eprintln!("Failed to open log file for reading: {}", e);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    continue;
-                }
-            }
-        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
 }
@@ -457,6 +486,9 @@ async fn run_log_ingestion(args: Args, db: Arc<Db>, verbose: bool) -> Result<()>
 
     let retention_secs = args.retention * 24 * 3600;
     let mut last_cleanup = std::time::Instant::now();
+    let mut last_status = std::time::Instant::now();
+    let mut processed_count: u64 = 0;
+    let mut matched_count: u64 = 0;
 
     // Initial database cleanup
     let now_ts = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -472,7 +504,9 @@ async fn run_log_ingestion(args: Args, db: Arc<Db>, verbose: bool) -> Result<()>
     }
 
     while let Some(line) = rx.recv().await {
+        processed_count += 1;
         if let Some((bundle_id, source_eid)) = parse_bundle_log_line(&line) {
+            matched_count += 1;
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             let db_clone = db.clone();
             let bundle_id_clone = bundle_id.clone();
@@ -497,7 +531,7 @@ async fn run_log_ingestion(args: Args, db: Arc<Db>, verbose: bool) -> Result<()>
             }
         }
 
-        // Periodically run cleanup (every 60 seconds)
+        // Periodically run cleanup and log progress (every 60 seconds)
         if last_cleanup.elapsed() >= std::time::Duration::from_secs(60) {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             let db_clone = db.clone();
@@ -511,6 +545,16 @@ async fn run_log_ingestion(args: Args, db: Arc<Db>, verbose: bool) -> Result<()>
                 _ => {}
             }
             last_cleanup = std::time::Instant::now();
+        }
+
+        if last_status.elapsed() >= std::time::Duration::from_secs(60) {
+            if verbose {
+                eprintln!(
+                    "Log Ingestion Progress: read {} lines, matched/recorded {} bundle events",
+                    processed_count, matched_count
+                );
+            }
+            last_status = std::time::Instant::now();
         }
     }
 
@@ -536,13 +580,7 @@ async fn main() -> Result<()> {
 
     // gRPC address setup
     let localhost = if args.ipv6 { "[::1]" } else { "127.0.0.1" };
-    let port_str = if let Ok(env_port) = std::env::var("HARDY_GRPC_PORT") {
-        env_port
-    } else if let Ok(env_port) = std::env::var("DTN_WEB_PORT") {
-        env_port
-    } else {
-        args.port.to_string()
-    };
+    let port_str = resolve_grpc_port(args.port);
     let grpc_addr = format!("http://{}:{}", localhost, port_str);
 
     if args.verbose {
@@ -613,5 +651,31 @@ mod tests {
 
         let line_other = "Reaper task complete";
         assert!(parse_bundle_log_line(line_other).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tail_file_rotation() {
+        let temp = tempfile::tempdir().unwrap();
+        let log_file = temp.path().join("test.log");
+        std::fs::write(&log_file, "line1\nline2\n").unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let path_clone = log_file.clone();
+
+        let handle = tokio::spawn(async move {
+            tail_file(path_clone, tx).await;
+        });
+
+        assert_eq!(rx.recv().await.unwrap(), "line1");
+        assert_eq!(rx.recv().await.unwrap(), "line2");
+
+        // Simulate rotation: delete and recreate file
+        std::fs::remove_file(&log_file).unwrap();
+        std::fs::write(&log_file, "line3\nline4\n").unwrap();
+
+        assert_eq!(rx.recv().await.unwrap(), "line3");
+        assert_eq!(rx.recv().await.unwrap(), "line4");
+
+        handle.abort();
     }
 }

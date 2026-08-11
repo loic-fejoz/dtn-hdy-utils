@@ -1,18 +1,35 @@
 use hardy_cbor::decode::{self, FromCbor, Value};
 use hardy_cbor::encode::{self, Encoder, ToCbor};
+use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub mod coap_status {
+    pub const CHANGED: u8 = 66; // 2.02 Changed
+    pub const CONTENT: u8 = 69; // 2.05 Content
+    pub const BAD_REQUEST: u8 = 128; // 4.00 Bad Request
+    pub const FORBIDDEN: u8 = 131; // 4.03 Forbidden
+    pub const NOT_FOUND: u8 = 132; // 4.04 Not Found
+    pub const NOT_ACCEPTABLE: u8 = 134; // 4.06 Not Acceptable
+    pub const REQUEST_ENTITY_TOO_LARGE: u8 = 141; // 4.13 Request Entity Too Large
+    pub const INTERNAL_SERVER_ERROR: u8 = 160; // 5.00 Internal Server Error
+}
+
+/// Maximum recursion depth allowed when skipping unknown/unsupported CBOR values.
+/// This prevents malicious deeply nested inputs from causing stack overflow during deserialization.
+const CBOR_SKIP_DEPTH_LIMIT: usize = 10;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RequestItem {
     pub op: u64, // default 0 (0=GET, 1=CHECK, 2=SEARCH, 3=CANCEL, 4=LIST)
     pub uri: String,
     pub max_size: Option<u64>,
     pub accepted_formats: Option<Vec<String>>,
+    #[serde(serialize_with = "serialize_bytes_opt_vec")]
     pub have_hashes: Option<Vec<Vec<u8>>>,
     pub if_modified_since: Option<u64>,
     pub lifetime_override: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BasketRequest {
     pub experiment_tag: Option<u64>,
     pub version: u64,
@@ -22,8 +39,9 @@ pub struct BasketRequest {
     pub items: Vec<RequestItem>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ItemMetadata {
+    #[serde(serialize_with = "serialize_bytes")]
     pub hash: Vec<u8>,
     pub size: Option<u64>,
     pub mime_type: Option<String>,
@@ -31,7 +49,7 @@ pub struct ItemMetadata {
     pub last_modified: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ItemResponse {
     pub item_idx: u64,
     pub coap_status: u8,
@@ -39,12 +57,39 @@ pub struct ItemResponse {
     pub diagnostic: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BasketResponse {
     pub experiment_tag: Option<u64>,
     pub version: u64,
     pub req_id: String,
     pub items: Vec<ItemResponse>,
+}
+
+fn serialize_bytes<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&hex::encode(bytes))
+}
+
+fn serialize_bytes_opt_vec<S>(
+    opt_vec: &Option<Vec<Vec<u8>>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match opt_vec {
+        Some(vec) => {
+            use serde::ser::SerializeSeq;
+            let mut seq = serializer.serialize_seq(Some(vec.len()))?;
+            for val in vec {
+                seq.serialize_element(&hex::encode(val))?;
+            }
+            seq.end()
+        }
+        None => serializer.serialize_none(),
+    }
 }
 
 // CBOR decoding helpers
@@ -81,25 +126,41 @@ impl FromCbor for CborBytes {
     }
 }
 
+fn parse_cbor_text_value(
+    v: &Value,
+    shortest: bool,
+    tags: &[u64],
+) -> Result<(String, bool), decode::Error> {
+    if !tags.is_empty() {
+        return Err(decode::Error::IncorrectType(
+            "Untagged Text".to_string(),
+            "Tagged".to_string(),
+        ));
+    }
+    match v {
+        Value::Text(t) => Ok((t.to_string(), shortest)),
+        Value::TextStream(parts) => {
+            let combined = parts.iter().fold(String::new(), |mut acc, s| {
+                acc.push_str(s);
+                acc
+            });
+            Ok((combined, shortest))
+        }
+        _ => Err(decode::Error::IncorrectType(
+            "Text".to_string(),
+            v.type_name(!tags.is_empty()),
+        )),
+    }
+}
+
 pub struct CborString(pub String);
 
 impl FromCbor for CborString {
     type Error = decode::Error;
 
     fn from_cbor(data: &[u8]) -> Result<(Self, bool, usize), Self::Error> {
-        decode::parse_value(data, |v, shortest, tags| match v {
-            Value::Text(t) => Ok((CborString(t.to_string()), shortest)),
-            Value::TextStream(parts) => {
-                let combined = parts.iter().fold(String::new(), |mut acc, s| {
-                    acc.push_str(s);
-                    acc
-                });
-                Ok((CborString(combined), shortest))
-            }
-            _ => Err(decode::Error::IncorrectType(
-                "Text".to_string(),
-                v.type_name(!tags.is_empty()),
-            )),
+        decode::parse_value(data, |v, shortest, tags| {
+            parse_cbor_text_value(&v, shortest, tags).map(|(s, shortest)| (CborString(s), shortest))
         })
         .map(|((v, s), len)| (v, s, len))
     }
@@ -129,26 +190,20 @@ impl FromCbor for CborReqId {
     type Error = decode::Error;
 
     fn from_cbor(data: &[u8]) -> Result<(Self, bool, usize), Self::Error> {
-        decode::parse_value(data, |v, shortest, _tags| match v {
-            Value::Text(t) => Ok((CborReqId(t.to_string()), shortest)),
-            Value::TextStream(parts) => {
-                let combined = parts.iter().fold(String::new(), |mut acc, s| {
-                    acc.push_str(s);
-                    acc
-                });
-                Ok((CborReqId(combined), shortest))
-            }
-            Value::Bytes(r) => Ok((CborReqId(hex::encode(&data[r])), shortest)),
+        decode::parse_value(data, |v, shortest, tags| match v {
+            Value::Text(_) | Value::TextStream(_) => parse_cbor_text_value(&v, shortest, tags)
+                .map(|(s, shortest)| (CborReqId(s), shortest)),
+            Value::Bytes(r) => Ok((CborReqId(hex::encode(&data[r.clone()])), shortest)),
             Value::ByteStream(chunks) => {
                 let mut bytes = Vec::new();
                 for r in chunks {
-                    bytes.extend_from_slice(&data[r]);
+                    bytes.extend_from_slice(&data[r.clone()]);
                 }
                 Ok((CborReqId(hex::encode(&bytes)), shortest))
             }
             _ => Err(decode::Error::IncorrectType(
                 "Text or Bytes".to_string(),
-                v.type_name(false),
+                v.type_name(!tags.is_empty()),
             )),
         })
         .map(|((v, s), len)| (v, s, len))
@@ -221,7 +276,7 @@ impl FromCbor for RequestItem {
                         lifetime_override = Some(m.parse::<u64>()?);
                     }
                     _ => {
-                        m.skip_value(10)?;
+                        m.skip_value(CBOR_SKIP_DEPTH_LIMIT)?;
                     }
                 }
             }
@@ -293,16 +348,16 @@ impl FromCbor for BasketRequest {
                         })?;
                     }
                     _ => {
-                        m.skip_value(10)?;
+                        m.skip_value(CBOR_SKIP_DEPTH_LIMIT)?;
                     }
                 }
             }
 
             let version = version.ok_or_else(|| {
-                decode::Error::IncorrectType("version missing".to_string(), "None".to_string())
+                decode::Error::IncorrectType("version field".to_string(), "missing".to_string())
             })?;
             let req_id = req_id.ok_or_else(|| {
-                decode::Error::IncorrectType("req_id missing".to_string(), "None".to_string())
+                decode::Error::IncorrectType("req_id field".to_string(), "missing".to_string())
             })?;
 
             Ok((
@@ -527,5 +582,174 @@ impl ToCbor for BasketResponse {
                 }
             });
         });
+    }
+}
+
+impl FromCbor for ItemMetadata {
+    type Error = decode::Error;
+
+    fn from_cbor(data: &[u8]) -> Result<(Self, bool, usize), Self::Error> {
+        decode::parse_map(data, |m, shortest, _tags| {
+            let mut hash = Vec::new();
+            let mut size = None;
+            let mut mime_type = None;
+            let mut uri = None;
+            let mut last_modified = None;
+
+            while !m.at_end()? {
+                let key = m.parse::<u64>()?;
+                match key {
+                    0 => {
+                        hash = m.parse::<CborBytes>()?.0;
+                    }
+                    1 => {
+                        size = Some(m.parse::<u64>()?);
+                    }
+                    2 => {
+                        mime_type = Some(m.parse::<CborString>()?.0);
+                    }
+                    3 => {
+                        uri = Some(m.parse::<CborString>()?.0);
+                    }
+                    4 => {
+                        last_modified = Some(m.parse::<u64>()?);
+                    }
+                    _ => {
+                        m.skip_value(CBOR_SKIP_DEPTH_LIMIT)?;
+                    }
+                }
+            }
+
+            Ok((
+                ItemMetadata {
+                    hash,
+                    size,
+                    mime_type,
+                    uri,
+                    last_modified,
+                },
+                shortest,
+            ))
+        })
+        .map(|((v, s), len)| (v, s, len))
+    }
+}
+
+impl FromCbor for ItemResponse {
+    type Error = decode::Error;
+
+    fn from_cbor(data: &[u8]) -> Result<(Self, bool, usize), Self::Error> {
+        decode::parse_map(data, |m, shortest, _tags| {
+            let mut item_idx = 0;
+            let mut coap_status = 0;
+            let mut metadata = None;
+            let mut diagnostic = None;
+
+            while !m.at_end()? {
+                let key = m.parse::<u64>()?;
+                match key {
+                    0 => {
+                        item_idx = m.parse::<u64>()?;
+                    }
+                    1 => {
+                        let val = m.parse::<u64>()?;
+                        coap_status = u8::try_from(val).map_err(|_| {
+                            decode::Error::IncorrectType(
+                                "u8 CoAP status".to_string(),
+                                val.to_string(),
+                            )
+                        })?;
+                    }
+                    2 => {
+                        metadata = Some(m.parse::<ItemMetadata>()?);
+                    }
+                    3 => {
+                        diagnostic = Some(m.parse::<CborString>()?.0);
+                    }
+                    _ => {
+                        m.skip_value(CBOR_SKIP_DEPTH_LIMIT)?;
+                    }
+                }
+            }
+
+            Ok((
+                ItemResponse {
+                    item_idx,
+                    coap_status,
+                    metadata,
+                    diagnostic,
+                },
+                shortest,
+            ))
+        })
+        .map(|((v, s), len)| (v, s, len))
+    }
+}
+
+impl FromCbor for BasketResponse {
+    type Error = decode::Error;
+
+    fn from_cbor(data: &[u8]) -> Result<(Self, bool, usize), Self::Error> {
+        decode::parse_map(data, |m, shortest, tags| {
+            let experiment_tag = if tags.contains(&44444) {
+                Some(44444)
+            } else {
+                None
+            };
+            let mut version = None;
+            let mut req_id = None;
+            let mut items = Vec::new();
+
+            while !m.at_end()? {
+                let key = m.parse::<i64>()?;
+                match key {
+                    -1 => {
+                        let _val = m.parse::<u64>()?;
+                    }
+                    0 => {
+                        version = Some(m.parse::<u64>()?);
+                    }
+                    1 => {
+                        req_id = Some(m.parse::<CborReqId>()?.0);
+                    }
+                    2 => {
+                        m.parse_value(|val, _, _| match val {
+                            Value::Array(arr) => {
+                                while !arr.at_end()? {
+                                    let item = arr.parse::<ItemResponse>()?;
+                                    items.push(item);
+                                }
+                                Ok(())
+                            }
+                            _ => Err(decode::Error::IncorrectType(
+                                "Array".to_string(),
+                                val.type_name(false),
+                            )),
+                        })?;
+                    }
+                    _ => {
+                        m.skip_value(CBOR_SKIP_DEPTH_LIMIT)?;
+                    }
+                }
+            }
+
+            let version = version.ok_or_else(|| {
+                decode::Error::IncorrectType("version field".to_string(), "missing".to_string())
+            })?;
+            let req_id = req_id.ok_or_else(|| {
+                decode::Error::IncorrectType("req_id field".to_string(), "missing".to_string())
+            })?;
+
+            Ok((
+                BasketResponse {
+                    experiment_tag,
+                    version,
+                    req_id,
+                    items,
+                },
+                shortest,
+            ))
+        })
+        .map(|((v, s), len)| (v, s, len))
     }
 }

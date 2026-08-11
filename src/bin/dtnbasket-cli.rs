@@ -2,19 +2,16 @@ use anyhow::Result;
 use bytes::Bytes;
 use clap::Parser;
 use dtn_hdy_utils::basket::*;
-use dtn_hdy_utils::security::{load_key, sign_bundle};
-use hardy_bpa::async_trait;
+use dtn_hdy_utils::{NoopSenderCla, normalize_eid, resolve_grpc_port};
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::cla::{Cla as BpaCla, ForwardBundleResult, Sink as ClaSink};
 use hardy_bpv7::builder::Builder;
 use hardy_bpv7::creation_timestamp::CreationTimestamp;
-use hardy_bpv7::eid::{Eid, NodeId};
+use hardy_bpv7::eid::Eid;
 use hardy_cbor::encode::{Encoder, Tagged, ToCbor};
 use hardy_proto::client::RemoteBpa;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 
 #[derive(Parser, Debug)]
 #[command(name = "dtnbasket-cli", about = "Forge and send DTN Basket requests")]
@@ -22,6 +19,10 @@ struct Args {
     /// gRPC port of local Hardy BPA (defaults to 50051)
     #[arg(short, long)]
     port: Option<u16>,
+
+    /// Use IPv6 for connecting to Hardy
+    #[arg(short = '6', long)]
+    ipv6: bool,
 
     /// Verbose output
     #[arg(short, long)]
@@ -98,39 +99,6 @@ struct RequestFileItem {
 #[derive(Deserialize, Debug)]
 struct RequestFile {
     items: Vec<RequestFileItem>,
-}
-
-struct SenderCla {
-    sink: OnceCell<Box<dyn ClaSink>>,
-}
-
-#[async_trait]
-impl BpaCla for SenderCla {
-    async fn on_register(&self, sink: Box<dyn ClaSink>, _node_ids: &[NodeId]) {
-        let _ = self.sink.set(sink);
-    }
-
-    async fn on_unregister(&self) {}
-
-    async fn forward(
-        &self,
-        _queue: Option<u32>,
-        _cla_addr: &hardy_bpa::cla::ClaAddress,
-        _bundle: Bytes,
-    ) -> hardy_bpa::cla::Result<ForwardBundleResult> {
-        Ok(ForwardBundleResult::Sent)
-    }
-}
-
-fn normalize_eid(s: &str) -> String {
-    let s = s.trim();
-    if let Some(rest) = s
-        .strip_prefix("dtn://")
-        .filter(|r| !r.is_empty() && !r.contains('/'))
-    {
-        return format!("dtn://{}/", rest);
-    }
-    s.to_string()
 }
 
 #[tokio::main]
@@ -221,25 +189,16 @@ async fn main() -> Result<()> {
     }
 
     // 2. Resolve port and gRPC address
-    let port_str = if let Ok(env_port) = std::env::var("HARDY_GRPC_PORT") {
-        env_port
-    } else if let Ok(env_port) = std::env::var("DTN_WEB_PORT") {
-        env_port
-    } else if let Some(cli_port) = args.port {
-        cli_port.to_string()
-    } else {
-        "50051".to_string()
-    };
+    let port_str = resolve_grpc_port(args.port);
 
-    let grpc_addr = format!("http://127.0.0.1:{}", port_str);
+    let localhost = if args.ipv6 { "[::1]" } else { "127.0.0.1" };
+    let grpc_addr = format!("http://{}:{}", localhost, port_str);
     if args.verbose {
         eprintln!("Connecting to Hardy BPA at {}", grpc_addr);
     }
 
     let remote_bpa = RemoteBpa::new(grpc_addr);
-    let sender_cla = Arc::new(SenderCla {
-        sink: OnceCell::new(),
-    });
+    let sender_cla = Arc::new(NoopSenderCla::default());
 
     let cla_name = format!("dtnbasket-cli-{}", std::process::id());
     let node_ids = remote_bpa
@@ -253,19 +212,23 @@ async fn main() -> Result<()> {
 
     // 3. Determine EIDs
     let base_node = node_ids.first();
-    let source_eid = match base_node {
-        Some(hardy_bpv7::eid::NodeId::Dtn(node_name)) => Eid::Dtn {
-            node_name: node_name.clone(),
-            service_name: args.sender.trim().to_string().into_boxed_str(),
-        },
-        Some(hardy_bpv7::eid::NodeId::Ipn(fqnn)) => {
-            let service_number = args.sender.trim().parse::<u32>().unwrap_or(0);
-            Eid::Ipn {
-                fqnn: fqnn.clone(),
-                service_number,
+    let source_eid = if let Ok(eid) = normalize_eid(&args.sender).parse::<Eid>() {
+        eid
+    } else {
+        match base_node {
+            Some(hardy_bpv7::eid::NodeId::Dtn(node_name)) => Eid::Dtn {
+                node_name: node_name.clone(),
+                service_name: args.sender.trim().to_string().into_boxed_str(),
+            },
+            Some(hardy_bpv7::eid::NodeId::Ipn(fqnn)) => {
+                let service_number = args.sender.trim().parse::<u32>().unwrap_or(0);
+                Eid::Ipn {
+                    fqnn: fqnn.clone(),
+                    service_number,
+                }
             }
+            _ => Eid::Null,
         }
-        _ => Eid::Null,
     };
 
     let destination_eid = normalize_eid(&args.receiver)
@@ -308,9 +271,12 @@ async fn main() -> Result<()> {
     let req_id = args.req_id.clone().unwrap_or_else(|| {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        format!("req-{}-{}", now, std::process::id())
+            .unwrap_or_default()
+            .as_nanos();
+        let mut seed = (now as u64) ^ (std::process::id() as u64);
+        seed = seed.wrapping_mul(0x517cc1b727220a95);
+        seed ^= seed >> 32;
+        format!("req-{:x}-{:x}", seed, std::process::id())
     });
 
     let request = BasketRequest {
@@ -336,7 +302,14 @@ async fn main() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to build request bundle: {e}"))?;
 
     // BPSec Signing if key is provided
-    let (bundle, binbundle) = maybe_sign_bundle(bundle, binbundle.into_vec(), &args)?;
+    let (bundle, binbundle) = dtn_hdy_utils::security::maybe_sign_bundle(
+        bundle,
+        binbundle.into_vec(),
+        args.sign_key.as_deref(),
+        args.sign_key_file.as_deref(),
+        args.security_source.as_deref(),
+        args.verbose,
+    )?;
 
     if let Some(sink) = sender_cla.sink.get() {
         sink.dispatch(Bytes::from(binbundle), None, None)
@@ -357,30 +330,4 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn maybe_sign_bundle(
-    bundle: hardy_bpv7::bundle::Bundle,
-    binbundle: Vec<u8>,
-    args: &Args,
-) -> Result<(hardy_bpv7::bundle::Bundle, Vec<u8>)> {
-    if args.sign_key.is_some() || args.sign_key_file.is_some() {
-        let key_mat = load_key(args.sign_key.as_deref(), args.sign_key_file.as_deref())?;
-        let sec_source = if let Some(ref sec_str) = args.security_source {
-            Some(
-                normalize_eid(sec_str)
-                    .parse::<Eid>()
-                    .map_err(|e| anyhow::anyhow!("Invalid security source EID: {e}"))?,
-            )
-        } else {
-            None
-        };
-        if args.verbose {
-            eprintln!("Signing bundle with HMAC-SHA256...");
-        }
-        let (signed_bundle, signed_binbundle) = sign_bundle(&binbundle, &key_mat, sec_source)?;
-        Ok((signed_bundle, signed_binbundle))
-    } else {
-        Ok((bundle, binbundle))
-    }
 }

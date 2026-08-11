@@ -214,13 +214,21 @@ fn parse_key_data(data: &[u8], is_file: bool) -> Result<KeyMaterial> {
     }
 
     // 2. Hex String Detection
-    let hex_candidate = if text.starts_with("0x") || text.starts_with("0X") {
-        &text[2..]
-    } else {
-        &text
-    };
+    let (is_explicit_hex, hex_candidate) =
+        if let Some(stripped) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+            (true, stripped)
+        } else {
+            (false, text.as_str())
+        };
+
+    if is_explicit_hex {
+        let hex_bytes =
+            hex::decode(hex_candidate).map_err(|e| anyhow!("Invalid hex key material: {e}"))?;
+        return Ok(KeyMaterial { raw: hex_bytes });
+    }
 
     if !hex_candidate.is_empty()
+        && hex_candidate.len() % 2 == 0
         && hex_candidate.chars().all(|c| c.is_ascii_hexdigit())
         && let Ok(hex_bytes) = hex::decode(hex_candidate)
     {
@@ -323,7 +331,10 @@ pub fn verify_bundle(binbundle: &[u8], keystore: &KeyStore) -> VerifyResult {
                 .any(|b| matches!(b.block_type, hardy_bpv7::block::Type::BlockIntegrity));
 
             if has_bib {
-                let sec_source_opt = captured_source.lock().unwrap().clone();
+                let sec_source_opt = captured_source
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
                 if let Some(sec_source) = sec_source_opt {
                     let matching_keys = keystore.find_keys(&sec_source);
                     if matching_keys.is_empty() {
@@ -352,12 +363,45 @@ pub fn verify_bundle(binbundle: &[u8], keystore: &KeyStore) -> VerifyResult {
         }
         Err(e) => {
             let err_msg = e.to_string();
-            if err_msg.contains("expecting Array") || err_msg.contains("NotCanonical") {
+            if err_msg.contains("expecting Array")
+                || err_msg.contains("violates RFC 9171 canonical CBOR")
+                || err_msg.contains("NotCanonical")
+            {
                 VerifyResult::Unsigned
             } else {
                 VerifyResult::Invalid(err_msg)
             }
         }
+    }
+}
+
+/// Sign a bundle if key material is supplied.
+pub fn maybe_sign_bundle(
+    bundle: hardy_bpv7::bundle::Bundle,
+    binbundle: Vec<u8>,
+    sign_key: Option<&str>,
+    sign_key_file: Option<&str>,
+    security_source: Option<&str>,
+    verbose: bool,
+) -> Result<(hardy_bpv7::bundle::Bundle, Vec<u8>)> {
+    if sign_key.is_some() || sign_key_file.is_some() {
+        let key_mat = load_key(sign_key, sign_key_file)?;
+        let sec_source = if let Some(sec_str) = security_source {
+            Some(
+                crate::normalize_eid(sec_str)
+                    .parse::<Eid>()
+                    .map_err(|e| anyhow!("Invalid security source EID: {e}"))?,
+            )
+        } else {
+            None
+        };
+        if verbose {
+            eprintln!("Signing bundle with HMAC-SHA256...");
+        }
+        let (signed_bundle, signed_binbundle) = sign_bundle(&binbundle, &key_mat, sec_source)?;
+        Ok((signed_bundle, signed_binbundle))
+    } else {
+        Ok((bundle, binbundle))
     }
 }
 

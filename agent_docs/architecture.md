@@ -7,7 +7,7 @@ Both utilities communicate with the local `hardy` BPA instance using the gRPC se
 
 ```mermaid
 graph TD
-    ClientApp["dtnprint / dtnsend / dtntrigger / dtnping"] -->|gRPC Client Wrapper| RemoteBpa[RemoteBpa]
+    ClientApp["dtnprint / dtnsend / dtntrigger / dtnping / dtnfiles"] -->|gRPC Client Wrapper| RemoteBpa[RemoteBpa]
     RemoteBpa -->|gRPC over HTTP/2| HardyBPA[Hardy BPA Daemon]
 ```
 
@@ -43,4 +43,10 @@ graph TD
 - Builds ping bundles locally, optionally signing them with HMAC-SHA256, and dispatches them via `ServiceSink::send`.
 - Performs signature verification on incoming ping reply bundles (pongs) in `on_receive`.
 - Tracks RTTs locally and prints progress and final statistics. Status reports are parsed to show routing path transitions in real time. For details, see [dtnping.rs](../src/bin/dtnping.rs).
+
+### 6. The Files Utility (`dtnfiles`)
+- Registers as an endpoint service named `/files` on the Hardy BPA daemon.
+- Receives incoming bundles and parses the payload.
+- Automatically determines file extension by inspecting magic bytes of the payload (matching image, audio, or text formats recognized out of the box).
+- Saves the extracted payload to the specified directory with a filename derived from the bundle ID and the detected file extension. For details, see [dtnfiles.rs](../src/bin/dtnfiles.rs).
 

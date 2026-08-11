@@ -35,10 +35,5 @@ hardy-cbor = { path = "../hardy/cbor" }
 
 rustls = "0.23"
 
-
-
-
-
 [patch.crates-io]
 sqlx-sqlite = { path = "../hardy/patches/sqlx-sqlite" }
-

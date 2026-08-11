@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use clap::Parser;
+use dtn_hdy_utils::resolve_grpc_port;
 use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
 use hardy_bpa::async_trait;
 use hardy_bpa::bpa::BpaRegistration;
@@ -19,8 +20,8 @@ use tokio::sync::OnceCell;
 #[command(author, version, about = "Send ping bundles and measure round-trip time", long_about = None)]
 struct Args {
     /// Local gRPC port of Hardy BPA (default = 50051)
-    #[arg(short, long, default_value_t = 50051)]
-    port: u16,
+    #[arg(short, long)]
+    port: Option<u16>,
 
     /// Use IPv6 for connecting to Hardy
     #[arg(short = '6', long)]
@@ -472,13 +473,7 @@ async fn main() -> anyhow::Result<()> {
     // NoResponse = 1 (No responses received)
     // Error = 2 (Other error)
 
-    let port_str = if let Ok(env_port) = std::env::var("DTN_WEB_PORT") {
-        env_port
-    } else if let Ok(env_port) = std::env::var("HARDY_GRPC_PORT") {
-        env_port
-    } else {
-        args.port.to_string()
-    };
+    let port_str = resolve_grpc_port(args.port);
 
     let localhost = if args.ipv6 { "[::1]" } else { "127.0.0.1" };
     let grpc_addr = format!("http://{}:{}", localhost, port_str);
@@ -652,13 +647,27 @@ async fn main() -> anyhow::Result<()> {
                     ..Default::default()
                 };
 
-                let source_eid = app.local_eid.get().expect("Local EID not set").clone();
-                let (bundle, binbundle) = Builder::new(source_eid, destination_eid.clone())
+                let source_eid = match app.local_eid.get() {
+                    Some(eid) => eid.clone(),
+                    None => {
+                        eprintln!("Error: Local EID not set");
+                        let _ = sink.unregister().await;
+                        std::process::exit(2);
+                    }
+                };
+                let (bundle, binbundle) = match Builder::new(source_eid, destination_eid.clone())
                     .with_payload(payload_bytes.into())
                     .with_lifetime(lifetime)
                     .with_flags(flags)
                     .build(CreationTimestamp::now())
-                    .expect("failed to build bundle");
+                {
+                    Ok(res) => res,
+                    Err(e) => {
+                        eprintln!("Error: Failed to build bundle: {}", e);
+                        let _ = sink.unregister().await;
+                        std::process::exit(2);
+                    }
+                };
 
                 // Perform signing if requested
                 let (_bundle, binbundle) = if let Some(ref key_mat) = key_mat_opt {
@@ -796,13 +805,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Clean up
+    let exit_code = if received > 0 { 0 } else { 1 };
     sink.unregister().await;
-
-    if received > 0 {
-        std::process::exit(0);
-    } else {
-        std::process::exit(1);
-    }
+    std::process::exit(exit_code);
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ Do not define manual formatting constraints or spacing styles in documentation. 
 
 ## Command-Line Arguments & Parsing
 - All tools use `clap` with the derive feature for parsing command-line parameters.
-- View [`dtnprint.rs`](../src/bin/dtnprint.rs), [`dtnsend.rs`](../src/bin/dtnsend.rs), or [`dtnping.rs`](../src/bin/dtnping.rs) for examples of `Args` clap definitions.
+- View [`dtnprint.rs`](../src/bin/dtnprint.rs), [`dtnsend.rs`](../src/bin/dtnsend.rs), [`dtnping.rs`](../src/bin/dtnping.rs), or [`dtnfiles.rs`](../src/bin/dtnfiles.rs) for examples of `Args` clap definitions.
 - Port defaults to Hardy gRPC port `50051`.
 - Always verify environment variable overrides: check if `HARDY_GRPC_PORT` or `DTN_WEB_PORT` is specified before falling back to CLI defaults. See [`dtnsend.rs`](../src/bin/dtnsend.rs) for port resolution logic.
 

@@ -1,44 +1,22 @@
+use anyhow::Context;
 use bytes::Bytes;
 use clap::Parser;
-use hardy_bpa::async_trait;
+use dtn_hdy_utils::{NoopSenderCla, normalize_eid, resolve_grpc_port};
 use hardy_bpa::bpa::BpaRegistration;
-use hardy_bpa::cla::{Cla as BpaCla, ForwardBundleResult, Sink as ClaSink};
 use hardy_bpv7::builder::Builder;
 use hardy_bpv7::creation_timestamp::CreationTimestamp;
 use hardy_bpv7::eid::{DtnNodeId, Eid};
 use hardy_proto::client::RemoteBpa;
 use std::io::{self, Read};
 use std::sync::Arc;
-use tokio::sync::OnceCell;
-
-/// Normalize a user-supplied EID string so the BPv7 parser accepts it.
-///
-/// The BPv7 `dtn`-scheme parser requires a `/` separating the node name from
-/// the (possibly empty) service name.  Users commonly omit the trailing slash
-/// when they only intend to address a node (e.g. `dtn://beacon` instead of
-/// `dtn://beacon/`).  This function detects that pattern and appends the
-/// missing `/` before the string is handed to the parser.
-fn normalize_eid(s: &str) -> String {
-    let s = s.trim();
-    // Only touch bare dtn:// URIs that have no slash after the authority.
-    // A valid dtn EID looks like: dtn://node-name/service
-    // A bare node EID looks like: dtn://node-name  (no trailing slash)
-    if let Some(rest) = s.strip_prefix("dtn://")
-        && !rest.is_empty()
-        && !rest.contains('/')
-    {
-        return format!("dtn://{}/", rest);
-    }
-    s.to_string()
-}
 
 /// A simple Bundle Protocol 7 Send Utility for Delay Tolerant Networking interacting with Hardy
 #[derive(Parser, Debug)]
 #[clap(version, author, long_about = None)]
 struct Args {
     /// Local gRPC port (default = 50051)
-    #[clap(short, long, default_value_t = 50051)]
-    port: u16,
+    #[clap(short, long)]
+    port: Option<u16>,
 
     /// Use IPv6
     #[clap(short = '6', long)]
@@ -81,53 +59,24 @@ struct Args {
     security_source: Option<String>,
 }
 
-struct SenderCla {
-    sink: OnceCell<Box<dyn ClaSink>>,
-}
-
-#[async_trait]
-impl BpaCla for SenderCla {
-    async fn on_register(&self, sink: Box<dyn ClaSink>, _node_ids: &[hardy_bpv7::eid::NodeId]) {
-        let _ = self.sink.set(sink);
-    }
-
-    async fn on_unregister(&self) {}
-
-    async fn forward(
-        &self,
-        _queue: Option<u32>,
-        _cla_addr: &hardy_bpa::cla::ClaAddress,
-        _bundle: Bytes,
-    ) -> hardy_bpa::cla::Result<ForwardBundleResult> {
-        // We only dispatch incoming bundles, so forward is a no-op that reports success
-        Ok(ForwardBundleResult::Sent)
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let localhost = if args.ipv6 { "[::1]" } else { "127.0.0.1" };
-    let port_str = if let Ok(env_port) = std::env::var("HARDY_GRPC_PORT") {
-        env_port
-    } else if let Ok(env_port) = std::env::var("DTN_WEB_PORT") {
-        env_port
-    } else {
-        args.port.to_string()
-    };
+    let port_str = resolve_grpc_port(args.port);
 
     let mut buffer = Vec::new();
     if let Some(infile) = &args.infile {
         if args.verbose {
             eprintln!("Sending {}", infile);
         }
-        let mut f = std::fs::File::open(infile).expect("Error accessing file.");
+        let mut f = std::fs::File::open(infile).context("Error accessing file.")?;
         f.read_to_end(&mut buffer)
-            .expect("Error reading from file.");
+            .context("Error reading from file.")?;
     } else {
         io::stdin()
             .read_to_end(&mut buffer)
-            .expect("Error reading from stdin.");
+            .context("Error reading from stdin.")?;
     }
 
     if args.verbose {
@@ -136,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
 
     let destination_eid = normalize_eid(&args.receiver)
         .parse::<Eid>()
-        .expect("invalid receiver EID");
+        .context("invalid receiver EID")?;
 
     if args.dryrun {
         // Build the bundle locally using hardy_bpv7::builder::Builder
@@ -163,10 +112,17 @@ async fn main() -> anyhow::Result<()> {
             .with_payload(buffer.into())
             .with_lifetime(std::time::Duration::from_secs(args.lifetime))
             .build(CreationTimestamp::now())
-            .expect("failed to build bundle");
+            .context("failed to build bundle")?;
 
         // Perform signing if requested
-        let (bundle, binbundle) = maybe_sign_bundle(bundle, binbundle.into_vec(), &args)?;
+        let (bundle, binbundle) = dtn_hdy_utils::security::maybe_sign_bundle(
+            bundle,
+            binbundle.into_vec(),
+            args.sign_key.as_deref(),
+            args.sign_key_file.as_deref(),
+            args.security_source.as_deref(),
+            args.verbose,
+        )?;
 
         println!("Bundle-Id: {}", bundle.id.to_key());
         let hexstr: String = binbundle.iter().map(|b| format!("{:02x}", b)).collect();
@@ -178,9 +134,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         let remote_bpa = RemoteBpa::new(grpc_addr);
-        let sender_cla = Arc::new(SenderCla {
-            sink: OnceCell::new(),
-        });
+        let sender_cla = Arc::new(NoopSenderCla::default());
 
         // Register dynamically as a CLA with a unique name to avoid collisions
         let cla_name = format!("dtnsend-{}", std::process::id());
@@ -238,10 +192,17 @@ async fn main() -> anyhow::Result<()> {
             .with_payload(buffer.into())
             .with_lifetime(std::time::Duration::from_secs(args.lifetime))
             .build(CreationTimestamp::now())
-            .expect("failed to build bundle");
+            .context("failed to build bundle")?;
 
         // Perform signing if requested
-        let (bundle, binbundle) = maybe_sign_bundle(bundle, binbundle.into_vec(), &args)?;
+        let (bundle, binbundle) = dtn_hdy_utils::security::maybe_sign_bundle(
+            bundle,
+            binbundle.into_vec(),
+            args.sign_key.as_deref(),
+            args.sign_key_file.as_deref(),
+            args.security_source.as_deref(),
+            args.verbose,
+        )?;
 
         // Get the sink and send the payload
         if let Some(sink) = sender_cla.sink.get() {
@@ -269,34 +230,4 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn maybe_sign_bundle(
-    bundle: hardy_bpv7::bundle::Bundle,
-    binbundle: Vec<u8>,
-    args: &Args,
-) -> anyhow::Result<(hardy_bpv7::bundle::Bundle, Vec<u8>)> {
-    if args.sign_key.is_some() || args.sign_key_file.is_some() {
-        let key_mat = dtn_hdy_utils::security::load_key(
-            args.sign_key.as_deref(),
-            args.sign_key_file.as_deref(),
-        )?;
-        let sec_source = if let Some(ref sec_str) = args.security_source {
-            Some(
-                normalize_eid(sec_str)
-                    .parse::<Eid>()
-                    .map_err(|e| anyhow::anyhow!("Invalid security source EID: {e}"))?,
-            )
-        } else {
-            None
-        };
-        if args.verbose {
-            eprintln!("Signing bundle with HMAC-SHA256...");
-        }
-        let (signed_bundle, signed_binbundle) =
-            dtn_hdy_utils::security::sign_bundle(&binbundle, &key_mat, sec_source)?;
-        Ok((signed_bundle, signed_binbundle))
-    } else {
-        Ok((bundle, binbundle))
-    }
 }

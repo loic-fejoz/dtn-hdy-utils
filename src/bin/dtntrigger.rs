@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use clap::Parser;
+use dtn_hdy_utils::resolve_grpc_port;
 use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
 use hardy_bpa::async_trait;
 use hardy_bpa::bpa::BpaRegistration;
@@ -16,8 +17,8 @@ use tokio::sync::OnceCell;
 #[command(author, version, about = "Incoming trigger utility for Hardy BPA", long_about = None)]
 struct Args {
     /// Local gRPC port of Hardy BPA (default = 50051)
-    #[arg(short, long, default_value_t = 50051)]
-    port: u16,
+    #[arg(short, long)]
+    port: Option<u16>,
 
     /// Use IPv6
     #[arg(short = '6', long)]
@@ -63,6 +64,7 @@ struct TriggerApp {
     command: String,
     keystore: KeyStore,
     policy: VerifyPolicy,
+    shutting_down: std::sync::atomic::AtomicBool,
 }
 
 fn write_temp_file(data: &[u8], verbose: bool) -> anyhow::Result<NamedTempFile> {
@@ -82,21 +84,20 @@ fn execute_cmd(
     verbose: bool,
 ) -> anyhow::Result<()> {
     let fname_param = format!("{}", data_file.path().display());
-    let mut cmd_args = command.split_whitespace();
-    let program = match cmd_args.next() {
-        Some(p) => p,
-        None => return Ok(()),
-    };
 
-    let mut cmd = std::process::Command::new(program);
-    for arg in cmd_args {
-        cmd.arg(arg);
-    }
+    let mut cmd = std::process::Command::new("/bin/sh");
+    cmd.arg("-c");
+    let full_script = format!("{} \"$1\" \"$2\"", command);
+    cmd.arg(full_script);
+    cmd.arg("--"); // placeholder for $0
     cmd.arg(source);
     cmd.arg(&fname_param);
 
     if verbose {
-        eprintln!("[*] Executing: {:?} {} {}", cmd, source, fname_param);
+        eprintln!(
+            "[*] Executing: /bin/sh -c {:?} -- {} {}",
+            command, source, fname_param
+        );
     }
 
     let output = cmd.output()?;
@@ -124,6 +125,13 @@ impl BpaService for TriggerApp {
     async fn on_unregister(&self) {
         if self.verbose {
             eprintln!("Trigger service unregistered");
+        }
+        if !self
+            .shutting_down
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            eprintln!("Error: Trigger service unregistered (connection lost). Exiting.");
+            std::process::exit(1);
         }
     }
 
@@ -228,14 +236,7 @@ impl BpaService for TriggerApp {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Port override logic using DTN_WEB_PORT, falling back to HARDY_GRPC_PORT, then argument
-    let port = if let Ok(env_port) = std::env::var("DTN_WEB_PORT") {
-        env_port
-    } else if let Ok(env_port) = std::env::var("HARDY_GRPC_PORT") {
-        env_port
-    } else {
-        args.port.to_string()
-    };
+    let port = resolve_grpc_port(args.port);
 
     let localhost = if args.ipv6 { "[::1]" } else { "127.0.0.1" };
     let grpc_addr = format!("http://{}:{}", localhost, port);
@@ -261,6 +262,7 @@ async fn main() -> anyhow::Result<()> {
         command: args.command,
         keystore,
         policy,
+        shutting_down: std::sync::atomic::AtomicBool::new(false),
     });
 
     let service_id = if let Ok(num) = args.endpoint.parse::<u32>() {
@@ -278,6 +280,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Wait for Ctrl+C to exit
     tokio::signal::ctrl_c().await?;
+    app.shutting_down
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     eprintln!("\nShutting down trigger application...");
 
     if let Some(sink) = app.sink.get() {
@@ -313,6 +317,14 @@ mod tests {
         let temp = write_temp_file(b"test data", false)?;
         // We will run a command like "true" which exits with 0
         let status = execute_cmd("true", temp, "dtn://source", false);
+        assert!(status.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_execute_cmd_with_quotes() -> anyhow::Result<()> {
+        let temp = write_temp_file(b"test data", false)?;
+        let status = execute_cmd("echo 'hello world'", temp, "dtn://source", false);
         assert!(status.is_ok());
         Ok(())
     }

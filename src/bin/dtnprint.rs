@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use clap::Parser;
+use dtn_hdy_utils::resolve_grpc_port;
 use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
 use hardy_bpa::async_trait;
 use hardy_bpa::bpa::BpaRegistration;
@@ -14,8 +15,8 @@ use tokio::sync::OnceCell;
 #[command(author, version, about = "Simple application to print received textual DTN bundles", long_about = None)]
 struct Args {
     /// Local gRPC port of Hardy BPA (default = 50051)
-    #[arg(short, long, default_value_t = 50051)]
-    port: u16,
+    #[arg(short, long)]
+    port: Option<u16>,
 
     /// Use IPv6 for connecting to Hardy
     #[arg(short = '6', long)]
@@ -63,9 +64,8 @@ impl BpaService for PrintService {
     }
 
     async fn on_unregister(&self) {
-        if self.verbose {
-            eprintln!("Service unregistered");
-        }
+        eprintln!("Error: Service unregistered (connection lost). Exiting.");
+        std::process::exit(1);
     }
 
     async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
@@ -147,13 +147,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let localhost = if args.ipv6 { "[::1]" } else { "127.0.0.1" };
-    let port_str = if let Ok(env_port) = std::env::var("HARDY_GRPC_PORT") {
-        env_port
-    } else if let Ok(env_port) = std::env::var("DTN_WEB_PORT") {
-        env_port
-    } else {
-        args.port.to_string()
-    };
+    let port_str = resolve_grpc_port(args.port);
     let grpc_addr = format!("http://{}:{}", localhost, port_str);
 
     if args.verbose {
