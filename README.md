@@ -11,8 +11,49 @@ A collection of utility tools to interact with the `hardy` BPA implementation of
 - [**`dtnping`**](src/bin/dtnping.rs): Connects to a running local Hardy instance, registers as an application, sends ping bundles to a destination EID, and measures round-trip times (RTT) and path hops.
   *(Difference from Hardy's built-in `bp ping`: Hardy's built-in utility runs an entire standalone BPA daemon inline and establishes a direct Convergence Layer connection (e.g. TCPCLv4) to the destination. Conversely, `dtnping` registers purely as a lightweight application layer client on a local running Hardy daemon over gRPC, sending bundles through it).*
 - [**`hdy-stats`**](src/bin/hdy-stats.rs): Connects to the local Hardy BPA via gRPC, monitors the BPA's log output (either through a log file or systemd journald), records incoming/outgoing bundle traffic in a local SQLite database, and acts as a DTN service responder to answer statistics queries with formatted text reports.
+- [**`dtnbasket`**](src/bin/dtnbasket.rs): A responder service/application for Hardy DTN BPv7 implementing the DTN Basket Protocol ([draft-f4jxq-dtn-basket-00](draft-f4jxq-dtn-basket-00.xml)). It acts as a delay-tolerant resource proxy that serves local mapped paths, directories (with regex file matching), and proxy-fetches remote internet resources via HTTP(S) and Gemini protocols.
+- [**`dtnbasket-cli`**](src/bin/dtnbasket-cli.rs): A client CLI tool used to forge, sign, and transmit CBOR-serialized Basket request bundles to a remote responder service.
 
 See [examples](examples/README.md) for usage examples.
+
+## DTN Basket Protocol (`dtnbasket` & `dtnbasket-cli`)
+
+`dtnbasket` implements [draft-f4jxq-dtn-basket-00](draft-f4jxq-dtn-basket-00.xml) as a Rust service for Hardy DTN BPv7. It acts as an offline proxy that receives resource request lists (`BasketRequest`) packaged as CBOR, resolves them, and returns them to the caller (`BasketResponse`).
+
+### Features
+*   **Protocols Supported**: Fetches remote resources over `http://`, `https://`, and `gemini://` protocols.
+*   **Local File Server**: Serves files within directories listed in the configuration `allowed_dirs`.
+*   **URN Mappings**: Resolves specific static URN paths (e.g. `urn:dtn:doc:yaesu-ft817-um-fr`) to local file paths.
+*   **Search/List**: Resolves directory LIST and SEARCH queries using filename regex.
+*   **Security & Safety**: Integrates SSRF protection blocking queries to loopback/private network addresses, implements directory traversal protection, and validates BPSec bundle signatures.
+
+### Configuration
+
+The responder is configured using a flat TOML file. An example is provided at [`examples/dtnbasket.toml`](examples/dtnbasket.toml):
+
+```toml
+service_name = "dtnbasket"
+insecure_tls = false
+allowed_dirs = ["/home/loic/quickref"]
+
+[mappings]
+"urn:dtn:doc:yaesu-ft817-um-fr" = "/home/loic/quickref/FT-817_user_FR.pdf"
+```
+
+Start the responder:
+```bash
+cargo run --bin dtnbasket -- -c examples/dtnbasket.toml -v
+```
+
+### Sending Requests
+
+Use `dtnbasket-cli` to construct and dispatch requests:
+```bash
+cargo run --bin dtnbasket-cli -- \
+    --receiver dtn://node2/dtnbasket \
+    --get urn:dtn:doc:yaesu-ft817-um-fr \
+    --get https://w.fejoz.net
+```
 
 Refer to [AGENTS.md](AGENTS.md) for build, testing, and formatting guidelines.
 

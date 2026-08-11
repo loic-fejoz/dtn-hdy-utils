@@ -1,0 +1,23 @@
+# dtnbasket service configuration example
+
+# Service endpoint name to register with the local Hardy BPA.
+# The full EID will be dtn://<node-name>/<service_name>
+service_name = "dtnbasket"
+
+# Toggle to allow self-signed / invalid certificates for HTTP/HTTPS/Gemini.
+# Set to true only in closed/test network environments.
+insecure_tls = false
+
+# Parent folders from which file:// resources are allowed to be served.
+# Any access outside these folders will be rejected (SSRF/path-traversal protection).
+allowed_dirs = [
+    "/home/loic/quickref",
+    "/var/log",
+    "./src/bin",
+]
+
+[mappings]
+# Static mappings from uniform resource names (URN) to local file system paths
+"urn:dtn:doc:yaesu-ft817-um-fr" = "/home/loic/quickref/FT-817_user_FR.pdf"
+"urn:dtn:doc:rust-cheatsheet"  = "/home/loic/quickref/rust_cheatsheet.pdf"
+"urn:dtn:system-status"        = "/var/log/syslog"
