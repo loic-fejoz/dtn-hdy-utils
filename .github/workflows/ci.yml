@@ -27,6 +27,11 @@ jobs:
           path: hardy
           ref: '75a48f88119f9b06e11671150ae151032f703f6d'
 
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -88,6 +93,11 @@ jobs:
           repository: ricktaylor/hardy
           path: hardy
           ref: '75a48f88119f9b06e11671150ae151032f703f6d'
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
