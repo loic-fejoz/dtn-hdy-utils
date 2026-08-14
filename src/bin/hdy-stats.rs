@@ -657,7 +657,7 @@ mod tests {
     async fn test_tail_file_rotation() {
         let temp = tempfile::tempdir().unwrap();
         let log_file = temp.path().join("test.log");
-        std::fs::write(&log_file, "line1\nline2\n").unwrap();
+        std::fs::write(&log_file, "line1\nline2\nlonger_line\n").unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
         let path_clone = log_file.clone();
@@ -666,15 +666,23 @@ mod tests {
             tail_file(path_clone, tx).await;
         });
 
-        assert_eq!(rx.recv().await.unwrap(), "line1");
-        assert_eq!(rx.recv().await.unwrap(), "line2");
+        let test_fut = async {
+            assert_eq!(rx.recv().await.unwrap(), "line1");
+            assert_eq!(rx.recv().await.unwrap(), "line2");
+            assert_eq!(rx.recv().await.unwrap(), "longer_line");
 
-        // Simulate rotation: delete and recreate file
-        std::fs::remove_file(&log_file).unwrap();
-        std::fs::write(&log_file, "line3\nline4\n").unwrap();
+            // Simulate rotation: delete and recreate with a shorter file to force rotation detection
+            // even if the OS reuses the same inode.
+            std::fs::remove_file(&log_file).unwrap();
+            std::fs::write(&log_file, "line3\nline4\n").unwrap();
 
-        assert_eq!(rx.recv().await.unwrap(), "line3");
-        assert_eq!(rx.recv().await.unwrap(), "line4");
+            assert_eq!(rx.recv().await.unwrap(), "line3");
+            assert_eq!(rx.recv().await.unwrap(), "line4");
+        };
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), test_fut)
+            .await
+            .expect("test_tail_file_rotation timed out (potential deadlock)");
 
         handle.abort();
     }

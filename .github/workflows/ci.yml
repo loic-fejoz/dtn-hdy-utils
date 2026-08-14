@@ -14,6 +14,7 @@ jobs:
   build-test-lint:
     name: Build, Test & Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout dtn-hdy-utils
         uses: actions/checkout@v4
@@ -81,6 +82,7 @@ jobs:
     needs: build-test-lint
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout dtn-hdy-utils
         uses: actions/checkout@v4
