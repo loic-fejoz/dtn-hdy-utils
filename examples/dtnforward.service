@@ -1,0 +1,48 @@
+# Template for systemd User Service: dtnforward
+#
+# Save this file to: ~/.config/systemd/user/dtnforward.service
+#
+# To manage the service:
+#   systemctl --user daemon-reload
+#   systemctl --user enable dtnforward.service
+#   systemctl --user start dtnforward.service
+#
+# To view real-time logs (handled & rotated automatically by journald):
+#   journalctl --user -u dtnforward.service -f
+#
+# To check log disk usage:
+#   journalctl --user-uid=$(id -u) --disk-usage
+
+[Unit]
+Description=DTN BIBE Forwarder (chat -> f4jxq-9/bibe)
+Documentation=https://github.com/loic-fejoz/dtn-hdy-utils
+After=network.target
+# After=hardy-bpa.service
+# Requires=hardy-bpa.service
+
+[Service]
+Type=simple
+
+# Path to the compiled dtnforward binary. Change this if installed elsewhere (e.g. /usr/local/bin/dtnforward)
+ExecStart=%h/projets/dtn-hdy-utils/target/release/dtnforward \
+    --service chat \
+    --target dtn://N0CALL-9/bibe \
+    --verify-policy warn \
+    --lifetime-default 3600 \
+    --max-depth 10 \
+    -v
+
+# Restart policy: automatically restart the service if it crashes
+Restart=always
+RestartSec=5
+
+# Logging: stdout/stderr are routed to journald.
+# journald natively handles log rotation, compression, rate-limiting, and max size constraints.
+# (Configure limits in /etc/systemd/journald.conf e.g., SystemMaxUse=50M or RuntimeMaxUse=50M)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dtnforward
+
+[Install]
+# When running as a --user service, the target is default.target instead of multi-user.target
+WantedBy=default.target

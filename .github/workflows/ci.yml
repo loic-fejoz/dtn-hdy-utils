@@ -1,0 +1,151 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  build-test-lint:
+    name: Build, Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dtn-hdy-utils
+        uses: actions/checkout@v4
+        with:
+          path: dtn-hdy-utils
+
+      - name: Checkout hardy dependency
+        uses: actions/checkout@v4
+        with:
+          repository: ricktaylor/hardy
+          path: hardy
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dtn-hdy-utils -> target
+
+      - name: Format Check
+        run: cargo fmt --all --check
+        working-directory: dtn-hdy-utils
+
+      - name: Clippy Lint
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: dtn-hdy-utils
+
+      - name: Run Tests
+        run: cargo test --all-targets
+        working-directory: dtn-hdy-utils
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dtn-hdy-utils
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dtn-hdy-utils
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Upload SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-artifacts
+          path: |
+            sbom.spdx.json
+            sbom.cdx.json
+
+  release:
+    name: Build & Publish Release
+    needs: build-test-lint
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dtn-hdy-utils
+        uses: actions/checkout@v4
+        with:
+          path: dtn-hdy-utils
+
+      - name: Checkout hardy dependency
+        uses: actions/checkout@v4
+        with:
+          repository: ricktaylor/hardy
+          path: hardy
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dtn-hdy-utils -> target
+
+      - name: Build Release Binaries
+        run: cargo build --release
+        working-directory: dtn-hdy-utils
+
+      - name: Package Release
+        run: |
+          mkdir -p dist
+          bins=(
+            "dtnbasket"
+            "dtnbasket-cli"
+            "dtnbib"
+            "dtnfiles"
+            "dtnforward"
+            "dtnping"
+            "dtnprint"
+            "dtnquery"
+            "dtnsend"
+            "dtntrigger"
+            "hdy-stats"
+          )
+          for bin in "${bins[@]}"; do
+            cp "dtn-hdy-utils/target/release/$bin" dist/
+          done
+          cp dtn-hdy-utils/README.md dist/ || true
+          cp dtn-hdy-utils/LICENSE.md dist/ || true
+          tar -czf "dtn-hdy-utils-${{ github.ref_name }}-linux-amd64.tar.gz" -C dist .
+          rm -rf dist
+        shell: bash
+
+      - name: Generate SPDX SBOM for Release
+        uses: anchore/sbom-action@v0
+        with:
+          path: dtn-hdy-utils
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Generate CycloneDX SBOM for Release
+        uses: anchore/sbom-action@v0
+        with:
+          path: dtn-hdy-utils
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dtn-hdy-utils-${{ github.ref_name }}-linux-amd64.tar.gz
+            sbom.spdx.json
+            sbom.cdx.json
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -13,6 +13,16 @@ A collection of utility tools to interact with the `hardy` BPA implementation of
 - [**`hdy-stats`**](src/bin/hdy-stats.rs): Connects to the local Hardy BPA via gRPC, monitors the BPA's log output (either through a log file or systemd journald), records incoming/outgoing bundle traffic in a local SQLite database, and acts as a DTN service responder to answer statistics queries with formatted text reports.
 - [**`dtnbasket`**](src/bin/dtnbasket.rs): A responder service/application for Hardy DTN BPv7 implementing the DTN Basket Protocol ([draft-f4jxq-dtn-basket-00](draft-f4jxq-dtn-basket-00.xml)). It acts as a delay-tolerant resource proxy that serves local mapped paths, directories (with regex file matching), and proxy-fetches remote internet resources via HTTP(S) and Gemini protocols.
 - [**`dtnbasket-cli`**](src/bin/dtnbasket-cli.rs): A client CLI tool used to forge, sign, and transmit CBOR-serialized Basket request bundles to a remote responder service.
+- [**`dtnforward`**](src/bin/dtnforward.rs): Subscribes to a specified local service endpoint, wraps incoming bundles in a Bundle-in-Bundle Encapsulation (BIBE / RFC 9260) outer bundle, optionally signs it, and forwards it to a remote target EID via a dynamically registered CLA.
+- [**`dtnbib`**](src/bin/dtnbib.rs): A companion decapsulator for BIBE tunnels. It registers on the `bibe` endpoint, decapsulates outer bundles (Administrative Record 64443 or raw), handles EID alias rewriting to allow local delivery on Hardy while preventing infinite routing loops, verifies signatures, and re-signs modified inner bundles with local key material before re-injecting them.
+
+## Connection Resilience & Systemd Integration
+
+All service-oriented utilities (`dtnprint`, `dtntrigger`, `dtnforward`, `dtnbib`, `dtnbasket`, and `hdy-stats`) operate as lightweight gRPC client streams. If the connection to the Hardy BPA daemon is lost (e.g., Hardy restarts or is temporarily unavailable):
+1. The utilities detect the connection failure via their `on_unregister` handler.
+2. They print an error message to `stderr` and exit immediately with status code `1` (`std::process::exit(1)`).
+3. Reconnection is handled at the OS level by a supervisor like `systemd` (systemctl user or system services).
+4. By configuring `Restart=always` and `RestartSec=5` in your systemd service files (see templates in the `examples` folder), systemd will automatically restart the process every 5 seconds until the connection is successfully restored.
 
 See [examples](examples/README.md) for usage examples.
 

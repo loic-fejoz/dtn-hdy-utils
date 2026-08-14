@@ -7,6 +7,9 @@ This document provides a guide on how to write, mock, and run tests for the `dtn
 - To confirm successful registration and dynamic endpoint generation, launch `dtnprint`, `dtntrigger`, or `dtnfiles` and parse the generated EID.
 - To send bundles to a specific endpoint, invoke `dtnsend` with a file or piped `stdin` payload.
 - To verify BPSec integrity checking, configure a local keystore file and invoke the utilities with the `--keystore` and `--verify-policy` options to ensure signature validity/failure drop behaviors match expectation.
+- Complete end-to-end integration tests are provided in the `examples/` directory:
+  - [`test_basket.py`](file:///home/loic/projets/dtn-hdy-utils/examples/test_basket.py): Verifies the basket service request/response cycle.
+  - [`test_forward.py`](file:///home/loic/projets/dtn-hdy-utils/examples/test_forward.py): Verifies the forwarding service (BIBE encapsulation) using `dtnforward`, `dtnsend`, and `dtntrigger`.
 
 ## Dry-run & Serialization Verification
 - Offline tests of bundle assembly can be validated using the dry-run path which creates a bundle via `hardy_bpv7::builder::Builder`.

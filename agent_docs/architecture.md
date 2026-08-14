@@ -50,3 +50,19 @@ graph TD
 - Automatically determines file extension by inspecting magic bytes of the payload (matching image, audio, or text formats recognized out of the box).
 - Saves the extracted payload to the specified directory with a filename derived from the bundle ID and the detected file extension. For details, see [dtnfiles.rs](../src/bin/dtnfiles.rs).
 
+### 7. The Forwarder Utility (`dtnforward`)
+- Registers as an endpoint service on the Hardy BPA daemon to listen for incoming bundles on a specified service (e.g. `dtn://f4jxq/chat`).
+- Verifies the signature of the incoming (inner) bundle against the keystore according to the configured verify policy.
+- To prevent infinite forwarding loops, inspects the payload to verify that the nesting depth does not exceed `--max-depth`.
+- Dynamically registers a convergence layer adapter (CLA) at startup to bypass source EID spoofing checks.
+- Wraps the incoming bundle inside an outer bundle (Bundle-in-Bundle Encapsulation, BIBE) with the target destination and sender EID.
+- Signs the outer bundle if a signing key is configured, and dispatches the outer bundle via the CLA sink. For details, see [dtnforward.rs](../src/bin/dtnforward.rs).
+
+### 8. The Decapsulator Utility (`dtnbib`)
+- Registers as an endpoint service on the Hardy BPA daemon (usually `/bibe`, e.g. `dtn://f4jxq-2/bibe`) to receive incoming outer BIBE bundles.
+- Decapsulates the outer bundle payload, parsing it as a standard BIBE PDU (Administrative Record 64443) with a zero-copy fallback to a raw inner bundle representation.
+- Verifies the cryptographic BPSec signature of the original inner bundle against the keystore.
+- Rewrites the destination EID of the inner bundle according to EID alias mapping rules (e.g. replacing `dtn://f4jxq/` with the local node EID `dtn://f4jxq-2/`), which allows local delivery while preventing infinite routing loops.
+- **Signature Preservation (Gateway Mode)**: Since EID rewriting breaks the original signature of the inner bundle, if the original signature was verified as valid, `dtnbib` strips it and re-signs the rewritten inner bundle using the local node's signing key (`--sign-key`) before re-injecting. Unsigned or invalid bundles are never re-signed.
+- Re-injects the final (rewritten and optionally re-signed) inner bundle back into the local Hardy BPA via a dynamically registered CLA so it is routed and delivered locally. For details, see [dtnbib.rs](../src/bin/dtnbib.rs).
+
