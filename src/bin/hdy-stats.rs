@@ -249,7 +249,11 @@ impl BpaService for StatsApp {
         std::process::exit(1);
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+    async fn on_receive(
+        &self,
+        data: Bytes,
+        _expiry: time::OffsetDateTime,
+    ) -> hardy_bpa::services::Result<()> {
         if self.verbose {
             eprintln!("Received stats query bundle (len: {})", data.len());
         }
@@ -260,7 +264,7 @@ impl BpaService for StatsApp {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("Failed to parse incoming bundle: {}", e);
-                    return;
+                    return Ok(());
                 }
             };
         let request_bundle = parsed.bundle;
@@ -274,7 +278,7 @@ impl BpaService for StatsApp {
 
         if let Eid::Null = reply_dest {
             eprintln!("Cannot reply: both report_to and source are Null");
-            return;
+            return Ok(());
         }
 
         if self.verbose {
@@ -289,11 +293,11 @@ impl BpaService for StatsApp {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
                 eprintln!("Database error querying stats: {}", e);
-                return;
+                return Ok(());
             }
             Err(e) => {
                 eprintln!("Task join error querying stats: {}", e);
-                return;
+                return Ok(());
             }
         };
 
@@ -309,7 +313,7 @@ impl BpaService for StatsApp {
             Ok(val) => val,
             Err(e) => {
                 eprintln!("Failed to build response bundle: {}", e);
-                return;
+                return Ok(());
             }
         };
 
@@ -325,6 +329,7 @@ impl BpaService for StatsApp {
                 }
             }
         });
+        Ok(())
     }
 
     async fn on_status_notify(

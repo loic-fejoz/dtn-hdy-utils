@@ -158,7 +158,11 @@ impl BpaService for ForwardService {
         std::process::exit(1);
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+    async fn on_receive(
+        &self,
+        data: Bytes,
+        _expiry: time::OffsetDateTime,
+    ) -> hardy_bpa::services::Result<()> {
         let inner_parsed =
             hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys);
 
@@ -193,7 +197,7 @@ impl BpaService for ForwardService {
                     );
                     if self.policy == VerifyPolicy::Strict {
                         eprintln!("Bundle dropped due to strict verification policy.");
-                        return;
+                        return Ok(());
                     }
                 }
                 VerifyResult::Unsigned => {
@@ -202,7 +206,7 @@ impl BpaService for ForwardService {
                             "WARNING: Unsigned inner bundle received from {}. Dropped due to strict verification policy.",
                             inner_source
                         );
-                        return;
+                        return Ok(());
                     } else if self.verbose {
                         eprintln!("Received unsigned inner bundle from {}", inner_source);
                     }
@@ -218,7 +222,7 @@ impl BpaService for ForwardService {
                     "WARNING: Drop bundle from {} due to nesting depth {} exceeding max-depth {}",
                     inner_source, depth, self.max_depth
                 );
-                return;
+                return Ok(());
             }
         }
 
@@ -260,7 +264,7 @@ impl BpaService for ForwardService {
                 Ok(res) => res,
                 Err(e) => {
                     eprintln!("ERROR: Failed to build outer bundle: {}", e);
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -275,7 +279,7 @@ impl BpaService for ForwardService {
             Ok(res) => res,
             Err(e) => {
                 eprintln!("ERROR: Failed to sign outer bundle: {}", e);
-                return;
+                return Ok(());
             }
         };
 
@@ -317,6 +321,7 @@ impl BpaService for ForwardService {
         } else {
             eprintln!("ERROR: CLA sink not available to dispatch outer bundle.");
         }
+        Ok(())
     }
 
     async fn on_status_notify(
@@ -372,7 +377,7 @@ async fn main() -> anyhow::Result<()> {
                 service_name: "".into(),
             },
             Some(hardy_bpv7::eid::NodeId::Ipn(fqnn)) => Eid::Ipn {
-                fqnn: fqnn.clone(),
+                fqnn: *fqnn,
                 service_number: 0,
             },
             _ => {

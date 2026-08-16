@@ -6,15 +6,15 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
-hardy-bpa = { version = "0.1.0", features = ["serde", "tokio"] }
-hardy-proto = "0.1"
-hardy-bpv7 = { version = "0.5.0", features = ["std", "serde", "rfc9173"] }
+hardy-bpa = { path = "../hardy/bpa", features = ["serde", "tokio"] }
+hardy-proto = { path = "../hardy/proto" }
+hardy-bpv7 = { path = "../hardy/bpv7", features = ["std", "serde", "rfc9173"] }
 tokio = { version = "1.52.3", features = ["full"] }
 anyhow = "1.0.102"
 time = "0.3.49"
 bytes = "1.11.1"
 rusqlite = { version = "0.40", features = ["array", "bundled", "time"] }
-sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "macros", "time"] }
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "macros", "time"] }
 config = { version = "0.15", features = ["yaml", "toml", "json"] }
 sha1 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
@@ -37,3 +37,4 @@ rustls = "0.23"
 
 [patch.crates-io]
 sqlx-sqlite = { path = "../hardy/patches/sqlx-sqlite" }
+

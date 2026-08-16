@@ -135,7 +135,11 @@ impl BpaService for TriggerApp {
         }
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+    async fn on_receive(
+        &self,
+        data: Bytes,
+        _expiry: time::OffsetDateTime,
+    ) -> hardy_bpa::services::Result<()> {
         let (source, payload) =
             match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
                 Ok(parsed) => {
@@ -166,7 +170,7 @@ impl BpaService for TriggerApp {
                     );
                     if self.policy == VerifyPolicy::Strict {
                         eprintln!("Bundle dropped due to strict verification policy.");
-                        return;
+                        return Ok(());
                     }
                 }
                 VerifyResult::Unsigned => {
@@ -175,7 +179,7 @@ impl BpaService for TriggerApp {
                             "WARNING: Unsigned bundle received from {}. Dropped due to strict verification policy.",
                             source
                         );
-                        return;
+                        return Ok(());
                     } else if self.verbose {
                         eprintln!("Received unsigned bundle from {}", source);
                     }
@@ -207,7 +211,7 @@ impl BpaService for TriggerApp {
                 Ok(df) => df,
                 Err(e) => {
                     eprintln!("[!] Error creating temporary file: {}", e);
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -218,6 +222,7 @@ impl BpaService for TriggerApp {
                 }
             });
         }
+        Ok(())
     }
 
     async fn on_status_notify(

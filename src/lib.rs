@@ -68,6 +68,7 @@ impl BpaCla for NoopSenderCla {
         &self,
         _queue: Option<u32>,
         _cla_addr: &hardy_bpa::cla::ClaAddress,
+        _bundle_id: &hardy_bpv7::bundle::Id,
         _bundle: Bytes,
     ) -> hardy_bpa::cla::Result<ForwardBundleResult> {
         Ok(ForwardBundleResult::Sent)

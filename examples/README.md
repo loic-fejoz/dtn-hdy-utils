@@ -116,3 +116,50 @@ The `hdy-stats` utility records traffic volume (the number of unique bundles rou
    ```bash
    cargo run --release --bin hdy-stats -- --show
    ```
+
+## DTN Fortune Teller Responder (`dtn-fortune.sh`)
+
+The `dtn-fortune.sh` script is a helper for `dtntrigger` that acts as an automated fortune teller responder over DTN. When queried, it randomly selects a DTN/networking-themed fortune cookie (in English or French) from custom fortune databases and transmits the response back to the requester via `dtnsend`.
+
+### Requirements:
+
+Ensure `fortune` and `strfile` are installed on the host system:
+```bash
+sudo apt install fortune-mod
+```
+
+### How to use:
+
+1. Make sure the script is executable:
+   ```bash
+   chmod +x examples/dtn-fortune.sh
+   ```
+
+2. Run `dtntrigger` listening on the `fortune` service endpoint:
+   ```bash
+   cargo run --release --bin dtntrigger -- -p 50051 -e fortune -c ./examples/dtn-fortune.sh -v
+   ```
+
+3. Start `dtnprint` on the client node to receive and display the fortune response (e.g. on endpoint `myfortune`):
+   ```bash
+   cargo run --release --bin dtnprint -- --service myfortune
+   ```
+
+4. Request a fortune via `dtnsend`:
+   
+   - **English fortune (default / empty payload)**:
+     ```bash
+     echo "" | cargo run --release --bin dtnsend -- -s myfortune -r dtn://<target-node>/fortune
+     ```
+
+   - **French fortune (payload `fr` or `french`)**:
+     ```bash
+     echo "fr" | cargo run --release --bin dtnsend -- -s myfortune -r dtn://<target-node>/fortune
+     ```
+
+5. The client `dtnprint` listener will display the returned fortune:
+   ```text
+   From: dtn://<target-node>/fortune
+   In DTN, the fastest route is patience.
+   ```
+

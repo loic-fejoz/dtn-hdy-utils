@@ -1373,7 +1373,11 @@ impl BpaService for BasketServiceWrapper {
         self.0.on_unregister().await;
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+    async fn on_receive(
+        &self,
+        data: Bytes,
+        _expiry: time::OffsetDateTime,
+    ) -> hardy_bpa::services::Result<()> {
         let (source, payload) =
             match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
                 Ok(parsed) => {
@@ -1406,7 +1410,7 @@ impl BpaService for BasketServiceWrapper {
                         eprintln!(
                             "Basket request bundle dropped due to strict verification policy."
                         );
-                        return;
+                        return Ok(());
                     }
                 }
                 VerifyResult::Unsigned => {
@@ -1415,7 +1419,7 @@ impl BpaService for BasketServiceWrapper {
                             "WARNING: Unsigned basket request bundle received from {}. Dropped due to strict verification policy.",
                             source
                         );
-                        return;
+                        return Ok(());
                     } else if self.0.verbose {
                         eprintln!("Received unsigned basket request bundle from {}", source);
                     }
@@ -1429,6 +1433,7 @@ impl BpaService for BasketServiceWrapper {
                 eprintln!("Error processing request: {}", e);
             }
         });
+        Ok(())
     }
 
     async fn on_status_notify(

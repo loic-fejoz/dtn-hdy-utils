@@ -183,7 +183,11 @@ impl BpaService for PingApp {
         }
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+    async fn on_receive(
+        &self,
+        data: Bytes,
+        _expiry: time::OffsetDateTime,
+    ) -> hardy_bpa::services::Result<()> {
         let receive_time = std::time::Instant::now();
 
         let (source, payload) =
@@ -216,7 +220,7 @@ impl BpaService for PingApp {
                     );
                     if self.policy == VerifyPolicy::Strict {
                         eprintln!("Ping response dropped due to strict verification policy.");
-                        return;
+                        return Ok(());
                     }
                 }
                 VerifyResult::Unsigned => {
@@ -225,7 +229,7 @@ impl BpaService for PingApp {
                             "WARNING: Unsigned ping response received from {}. Dropped due to strict verification policy.",
                             source
                         );
-                        return;
+                        return Ok(());
                     } else if self.verbose {
                         eprintln!("Received unsigned ping response from {}", source);
                     }
@@ -237,7 +241,7 @@ impl BpaService for PingApp {
             if self.verbose {
                 eprintln!("Ignoring bundle from unexpected source EID '{}'", source);
             }
-            return;
+            return Ok(());
         }
 
         // Decode sequence number from CBOR payload
@@ -247,7 +251,7 @@ impl BpaService for PingApp {
                 if self.verbose {
                     eprintln!("Failed to parse sequence number from ping reply payload");
                 }
-                return;
+                return Ok(());
             }
         };
 
@@ -263,7 +267,7 @@ impl BpaService for PingApp {
                     seq_no
                 );
             }
-            return;
+            return Ok(());
         };
 
         let rtt = receive_time.duration_since(sent_time);
@@ -292,6 +296,7 @@ impl BpaService for PingApp {
 
         // Signal response received
         self.semaphore.add_permits(1);
+        Ok(())
     }
 
     async fn on_status_notify(

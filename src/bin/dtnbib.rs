@@ -163,7 +163,11 @@ impl BpaService for BibService {
         std::process::exit(1);
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+    async fn on_receive(
+        &self,
+        data: Bytes,
+        _expiry: time::OffsetDateTime,
+    ) -> hardy_bpa::services::Result<()> {
         if self.verbose {
             eprintln!("Received outer bundle CBOR of size {} bytes.", data.len());
         }
@@ -173,7 +177,7 @@ impl BpaService for BibService {
             Ok(parsed) => parsed,
             Err(e) => {
                 eprintln!("WARNING: Failed to parse outer bundle: {}", e);
-                return;
+                return Ok(());
             }
         };
 
@@ -183,12 +187,12 @@ impl BpaService for BibService {
                 Some(payload) => payload,
                 None => {
                     eprintln!("WARNING: Failed to extract payload from outer bundle.");
-                    return;
+                    return Ok(());
                 }
             },
             None => {
                 eprintln!("WARNING: Outer bundle does not have a payload block.");
-                return;
+                return Ok(());
             }
         };
 
@@ -218,7 +222,7 @@ impl BpaService for BibService {
                 Ok(parsed) => parsed,
                 Err(e) => {
                     eprintln!("WARNING: Failed to parse inner bundle: {}", e);
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -255,7 +259,7 @@ impl BpaService for BibService {
                     );
                     if self.policy == VerifyPolicy::Strict {
                         eprintln!("Inner bundle dropped due to strict verification policy.");
-                        return;
+                        return Ok(());
                     }
                 }
                 VerifyResult::Unsigned => {
@@ -264,7 +268,7 @@ impl BpaService for BibService {
                             "WARNING: Unsigned inner bundle received from {}. Dropped due to strict verification policy.",
                             inner_source
                         );
-                        return;
+                        return Ok(());
                     } else if self.verbose {
                         eprintln!("Inner bundle from {} is unsigned.", inner_source);
                     }
@@ -277,7 +281,7 @@ impl BpaService for BibService {
             Ok(res) => res,
             Err(e) => {
                 eprintln!("ERROR: Failed to rewrite EID: {}", e);
-                return;
+                return Ok(());
             }
         };
 
@@ -297,7 +301,7 @@ impl BpaService for BibService {
                     rewritten_dest
                 );
             }
-            return;
+            return Ok(());
         }
 
         // 6. Build and re-sign if necessary
@@ -308,12 +312,12 @@ impl BpaService for BibService {
                     Some(payload) => payload,
                     None => {
                         eprintln!("WARNING: Failed to extract payload from inner bundle.");
-                        return;
+                        return Ok(());
                     }
                 },
                 None => {
                     eprintln!("WARNING: Inner bundle does not have a payload block.");
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -330,7 +334,7 @@ impl BpaService for BibService {
                 Ok(res) => res,
                 Err(e) => {
                     eprintln!("ERROR: Failed to rebuild inner bundle: {}", e);
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -344,7 +348,7 @@ impl BpaService for BibService {
                         Ok(k) => key_to_use = Some(k),
                         Err(e) => {
                             eprintln!("ERROR: Failed to load sign-key: {}", e);
-                            return;
+                            return Ok(());
                         }
                     }
                 } else {
@@ -388,7 +392,7 @@ impl BpaService for BibService {
                     Ok(res) => res,
                     Err(e) => {
                         eprintln!("ERROR: Failed to sign rebuilt inner bundle: {}", e);
-                        return;
+                        return Ok(());
                     }
                 }
             } else {
@@ -419,6 +423,7 @@ impl BpaService for BibService {
         } else {
             eprintln!("ERROR: CLA sink not available to re-inject bundle.");
         }
+        Ok(())
     }
 
     async fn on_status_notify(
@@ -496,7 +501,7 @@ async fn main() -> anyhow::Result<()> {
             service_name: "".into(),
         },
         Some(hardy_bpv7::eid::NodeId::Ipn(fqnn)) => Eid::Ipn {
-            fqnn: fqnn.clone(),
+            fqnn: *fqnn,
             service_number: 0,
         },
         _ => {

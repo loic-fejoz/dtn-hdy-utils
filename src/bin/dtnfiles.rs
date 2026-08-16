@@ -183,7 +183,11 @@ impl BpaService for FilesService {
         std::process::exit(1);
     }
 
-    async fn on_receive(&self, data: Bytes, _expiry: time::OffsetDateTime) {
+    async fn on_receive(
+        &self,
+        data: Bytes,
+        _expiry: time::OffsetDateTime,
+    ) -> hardy_bpa::services::Result<()> {
         let (source, bundle_id_str, payload, bundle_meta) =
             match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
                 Ok(parsed) => {
@@ -241,7 +245,7 @@ impl BpaService for FilesService {
                     );
                     if self.policy == VerifyPolicy::Strict {
                         eprintln!("Bundle dropped due to strict verification policy.");
-                        return;
+                        return Ok(());
                     }
                 }
                 VerifyResult::Unsigned => {
@@ -250,7 +254,7 @@ impl BpaService for FilesService {
                             "WARNING: Unsigned bundle received from {}. Dropped due to strict verification policy.",
                             source
                         );
-                        return;
+                        return Ok(());
                     } else if self.verbose {
                         eprintln!("Received unsigned bundle from {}", source);
                     }
@@ -302,6 +306,7 @@ impl BpaService for FilesService {
                 }
             }
         }
+        Ok(())
     }
 
     async fn on_status_notify(

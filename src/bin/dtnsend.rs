@@ -162,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
                     Some(hardy_bpv7::eid::NodeId::Ipn(fqnn)) => {
                         let service_number = sender_str.trim().parse::<u32>().unwrap_or(0);
                         Eid::Ipn {
-                            fqnn: fqnn.clone(),
+                            fqnn: *fqnn,
                             service_number,
                         }
                     }
@@ -176,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
                     service_name: "".into(),
                 },
                 Some(hardy_bpv7::eid::NodeId::Ipn(fqnn)) => Eid::Ipn {
-                    fqnn: fqnn.clone(),
+                    fqnn: *fqnn,
                     service_number: 0,
                 },
                 _ => Eid::Null,
