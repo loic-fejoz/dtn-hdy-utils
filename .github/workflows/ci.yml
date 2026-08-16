@@ -26,7 +26,7 @@ jobs:
         with:
           repository: ricktaylor/hardy
           path: hardy
-          ref: '75a48f88119f9b06e11671150ae151032f703f6d'
+          ref: 'a7be0d5c88ab1e46b4df88f414f2484c6283f43a'
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
@@ -94,7 +94,7 @@ jobs:
         with:
           repository: ricktaylor/hardy
           path: hardy
-          ref: '75a48f88119f9b06e11671150ae151032f703f6d'
+          ref: 'a7be0d5c88ab1e46b4df88f414f2484c6283f43a'
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
