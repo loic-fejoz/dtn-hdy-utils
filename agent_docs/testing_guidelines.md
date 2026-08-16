@@ -27,4 +27,6 @@ This document provides a guide on how to write, mock, and run tests for the `dtn
 Always run the validation suite before delivering modifications:
 - Run `cargo test` to execute all defined test cases.
 - Run `cargo clippy && cargo fmt --check` to ensure the codebase remains clean and warning-free.
+- Ensure the `hardy` checkout `ref` in `.github/workflows/ci.yml` is updated whenever `hardy` dependencies, trait signatures, or patches evolve.
+
 

@@ -10,6 +10,7 @@ Always run verification tests and check formatting before final delivery:
 - **Build**: `cargo build`
 - **Test**: `cargo test`
 - **Lint**: `cargo clippy && cargo fmt`
+- **CI Sync**: Whenever updating `hardy` dependencies or signatures, update the `hardy` checkout `ref` in `.github/workflows/ci.yml`.
 
 ## Directory Map
 - `src/bin/`: Main executable utilities (`dtnprint`, `dtnsend`, `dtnquery`, `dtntrigger`, `dtnping`, `dtnfiles`, `dtnforward`, `dtnbib`, and `hdy-stats`).
@@ -28,4 +29,5 @@ Read these files progressively based on your task context:
 ## Verification
 > [flat]
 > [!IMPORTANT]
-> You must ALWAYS verify your work by running the complete command check and test suites (`cargo test` and lint checks) before finishing any task.
+> You must ALWAYS verify your work by running the complete command check and test suites (`cargo test`, lint checks `cargo clippy && cargo fmt --check`, and ensuring `.github/workflows/ci.yml` dependencies are synchronized) before finishing any task.
+
