@@ -163,3 +163,35 @@ sudo apt install fortune-mod
    In DTN, the fastest route is patience.
    ```
 
+## Ecowitt Weather Station SenML Collector (`dtn-ecowitt.py`)
+
+The `dtn-ecowitt.py` script queries real-time weather data from the Ecowitt HTTP API, converts outdoor/indoor temperature (from °F to °C) and humidity into a standard SenML CBOR payload (RFC 8428), and sends it to a target DTN receiver (e.g. `dtn://N0CALL/senml`) using `dtnsend`.
+
+### How to use:
+
+1. Ensure the script is executable:
+   ```bash
+   chmod +x examples/dtn-ecowitt.py
+   ```
+
+2. Fetch from Ecowitt API and send directly over DTN:
+   ```bash
+   ./examples/dtn-ecowitt.py
+   ```
+
+3. Dry-run inspection (prints the SenML JSON structure and CBOR hex payload):
+   ```bash
+   ./examples/dtn-ecowitt.py -D
+   ```
+
+4. Options and overrides:
+   ```bash
+   ./examples/dtn-ecowitt.py \
+       --app-key "<APPLICATION_KEY>" \
+       --api-key "<API_KEY>" \
+       --mac "AA:BB:CC:DD:EE:FF" \
+       --receiver "dtn://N0CALL/senml" \
+       --base-urn "urn:ecowitt:aa-bb-cc-dd-ee-ff:" \
+       --lifetime 7200
+   ```
+
