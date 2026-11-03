@@ -36,6 +36,9 @@ pub struct HamConfig {
     /// Local gRPC application server settings.
     pub grpc: GrpcConfig,
 
+    /// Web dashboard and REST API server settings (optional).
+    pub web: Option<WebConfig>,
+
     /// Configured Convergence Layer Adapters (TCPCLv4, LTP, HQFBP).
     pub clas: Vec<cla::ClaConfig>,
 
@@ -51,6 +54,7 @@ impl Default for HamConfig {
             admin_endpoints: Vec::new(),
             storage: StorageConfig::default(),
             grpc: GrpcConfig::default(),
+            web: None,
             clas: Vec::new(),
             routes: Vec::new(),
         }
@@ -84,6 +88,36 @@ impl Default for GrpcConfig {
         Self {
             enabled: true,
             address: default_grpc_addr(),
+        }
+    }
+}
+
+fn default_web_addr() -> SocketAddr {
+    "127.0.0.1:8088".parse().expect("valid address")
+}
+
+fn default_web_static_dir() -> PathBuf {
+    PathBuf::from("dtn-hdy-ham/web/dist")
+}
+
+/// Web dashboard and REST API interface settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct WebConfig {
+    /// Local address to bind the web server (e.g. `127.0.0.1:8080`).
+    #[serde(default = "default_web_addr")]
+    pub address: SocketAddr,
+
+    /// Directory containing static web assets (Vite dist).
+    #[serde(default = "default_web_static_dir")]
+    pub static_dir: PathBuf,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            address: default_web_addr(),
+            static_dir: default_web_static_dir(),
         }
     }
 }

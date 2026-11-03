@@ -3,6 +3,7 @@
 pub mod config;
 pub mod coordinator;
 pub mod server;
+pub mod web;
 
 pub use config::HamConfig;
 pub use server::HamServer;

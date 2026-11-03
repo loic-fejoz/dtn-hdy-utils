@@ -20,13 +20,18 @@ use tracing::{info, warn};
 
 use crate::config::{HamConfig, cla::ClaType, cla::ScheduleConfig};
 use crate::coordinator::{ContactCoordinator, ContactSchedule, ContactTarget};
+use crate::web::AppState;
+use crate::web::injector::WebBundleInjector;
+use std::num::NonZeroU32;
 
 /// The standalone BPA server instance.
 pub struct HamServer {
+    config: HamConfig,
     bpa: Arc<Bpa>,
     grpc_config: Option<hardy_proto::server::Config>,
     tcp_peers: Vec<(Arc<hardy_tcpclv4::Tcpclv4>, Vec<SocketAddr>)>,
     coordinators: Vec<ContactCoordinator>,
+    web_injector: Option<WebBundleInjector>,
     tasks: TaskPool,
 }
 
@@ -44,7 +49,7 @@ impl HamServer {
                     Arc::new(BundleMemStorage::new(None, None)),
                 )
             } else {
-                let db_path = config.storage.sqlite_path.unwrap_or_else(|| {
+                let db_path = config.storage.sqlite_path.clone().unwrap_or_else(|| {
                     if let Some(base_dirs) = directories::BaseDirs::new() {
                         base_dirs
                             .data_local_dir()
@@ -114,7 +119,7 @@ impl HamServer {
         // 4. Configure CLAs
         let mut tcp_peers = Vec::new();
         let mut coordinators = Vec::new();
-        for cla_config in config.clas {
+        for cla_config in config.clas.clone() {
             let (cla, init): (Arc<dyn Cla>, ClaInit) = match cla_config.cla_type {
                 ClaType::TcpClv4(tcp_cfg) => {
                     let mut b = hardy_tcpclv4::Tcpclv4::builder();
@@ -288,6 +293,23 @@ impl HamServer {
             builder = builder.cla(cla_config.name, cla, None, init);
         }
 
+        let web_injector = if config.web.is_some() {
+            let injector = WebBundleInjector::new();
+            builder = builder.cla(
+                "web-sender",
+                Arc::new(injector.clone()),
+                None,
+                ClaInit {
+                    address_type: None,
+                    lane_count: NonZeroU32::new(1),
+                    max_bundle_size: None,
+                },
+            );
+            Some(injector)
+        } else {
+            None
+        };
+
         let bpa = Arc::new(builder.build().await.map_err(anyhow::Error::from_boxed)?);
 
         let grpc_config = if config.grpc.enabled {
@@ -305,10 +327,12 @@ impl HamServer {
         };
 
         Ok(Self {
+            config,
             bpa,
             grpc_config,
             tcp_peers,
             coordinators,
+            web_injector,
             tasks,
         })
     }
@@ -374,6 +398,25 @@ impl HamServer {
             );
         }
 
+        if let Some(ref web_config) = self.config.web {
+            let state = AppState {
+                config: Arc::new(self.config.clone()),
+                injector: self.web_injector.clone().expect("web_injector initialized"),
+            };
+            let cancel = self.tasks.cancel_token().clone();
+            let addr = web_config.address;
+            let web_handle = crate::web::start_web_server(state, addr).await?;
+            let abort_handle = web_handle.abort_handle();
+            hardy_async::spawn!(self.tasks, "web_server", async move {
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        abort_handle.abort();
+                    }
+                    _ = web_handle => {}
+                }
+            });
+        }
+
         info!("Hardy Ham BPA started successfully. Press Ctrl+C to terminate.");
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -397,5 +440,11 @@ impl HamServer {
     #[must_use]
     pub fn bpa(&self) -> Arc<Bpa> {
         self.bpa.clone()
+    }
+
+    /// Accessor for the web bundle injector if configured.
+    #[must_use]
+    pub fn web_injector(&self) -> Option<WebBundleInjector> {
+        self.web_injector.clone()
     }
 }

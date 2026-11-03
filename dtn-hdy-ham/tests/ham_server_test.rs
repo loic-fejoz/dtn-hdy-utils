@@ -161,3 +161,107 @@ clas:
         _ => panic!("expected MercuryArq CLA"),
     }
 }
+
+#[tokio::test]
+async fn test_ham_web_api_routes() {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use dtn_hdy_ham::web::{AppState, create_router};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    let config = HamConfig {
+        callsign: Some("STATA".to_string()),
+        node_id: "dtn://stata/".to_string(),
+        storage: dtn_hdy_ham::config::StorageConfig {
+            in_memory: true,
+            ..Default::default()
+        },
+        grpc: dtn_hdy_ham::config::GrpcConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        web: Some(dtn_hdy_ham::config::WebConfig {
+            address: "127.0.0.1:0".parse().unwrap(),
+            static_dir: std::path::PathBuf::from("web/dist"),
+        }),
+        ..Default::default()
+    };
+
+    let server = HamServer::new(config.clone())
+        .await
+        .expect("HamServer should build");
+    server.bpa().start(false).await;
+
+    // Use router with AppState connected to the real server injector
+    let injector = server.web_injector().expect("injector configured");
+    let state = AppState {
+        config: Arc::new(config),
+        injector,
+    };
+    let app = create_router(state);
+
+    // 1. Test GET /api/v1/config
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(v["callsign"], "STATA");
+    assert_eq!(v["node_id"], "dtn://stata/");
+    assert_eq!(v["status"], "ok");
+
+    // 2. Test POST /api/v1/bundles with valid payload
+    let send_req = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/bundles")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"destination": "dtn://statb/incoming", "payload": "hello world"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(send_req.status(), StatusCode::CREATED);
+    let send_bytes = axum::body::to_bytes(send_req.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let send_json: serde_json::Value = serde_json::from_slice(&send_bytes).unwrap();
+    assert_eq!(send_json["status"], "sent");
+    assert!(send_json["bundle_id"].as_str().is_some());
+    assert_eq!(send_json["destination"], "dtn://statb/incoming");
+
+    // 3. Test POST /api/v1/bundles with invalid destination
+    let bad_req = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/bundles")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"destination": "", "payload": "hi"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(bad_req.status(), StatusCode::BAD_REQUEST);
+
+    server.shutdown().await;
+}

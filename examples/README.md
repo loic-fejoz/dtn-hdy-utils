@@ -301,5 +301,27 @@ This demonstrates two `dtn-hdy-ham` instances interconnected via the Mercury ARQ
    echo "Hello STATA from STATB in reverse direction!" | cargo run --bin dtnsend -- --port 3051 --receiver dtn://stata/incoming -v
    ```
 
+## Web Dashboard and REST API (`test-web.yaml`)
+
+This demonstrates the Axum web server and Preact single-page application embedded in `dtn-hdy-ham`:
+- Exposes a REST API under `/api/v1/` (`GET /api/v1/config`, `POST /api/v1/bundles`).
+- Serves the responsive Vite + Preact + Tailwind CSS web dashboard from `dtn-hdy-ham/web/dist` with client-side SPA routing fallback.
+- Read-only visualization of the active station configuration, CLAs, peers, and static routes.
+- Generic bundle sender supporting text messages and binary file uploads (`multipart/form-data`).
+
+### Running the web dashboard:
+
+1. Build the web assets (if modifying the frontend in `dtn-hdy-ham/web/`):
+   ```bash
+   cd dtn-hdy-ham/web && pnpm build && cd ../..
+   ```
+
+2. Start the `dtn-hdy-ham` daemon:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/test-web.yaml
+   ```
+
+3. Open your browser at `http://127.0.0.1:8088/` to access the dashboard.
+
 
 
