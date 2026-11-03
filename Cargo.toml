@@ -8,6 +8,7 @@ members = [
     "ltp-cla/fuzz",
     "hqfbp-cla",
     "hqfbp-cla/fuzz",
+    "mercury-cla",
     "dtn-hdy-ham",
 ]
 

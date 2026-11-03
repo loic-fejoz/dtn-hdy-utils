@@ -1,0 +1,20 @@
+# Station B (STATB) using Mercury Connected ARQ Mode (Ports 8400/8401)
+callsign: "STATB"
+
+storage:
+  in-memory: true
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3051"
+
+clas:
+  - name: "mercury-arq-b"
+    type: "mercury-arq"
+    control-addr: "127.0.0.1:8400"
+    data-addr: "127.0.0.1:8401"
+    bandwidth: 2300
+    connect-timeout: "30s"
+    grace-period: "15s"
+    peers:
+      - callsign: "STATA"

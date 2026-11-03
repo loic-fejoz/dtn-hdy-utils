@@ -18,13 +18,15 @@ use hardy_proto::server::GrpcServer;
 use hardy_sqlite_storage::SqliteStorage;
 use tracing::{info, warn};
 
-use crate::config::{HamConfig, cla::ClaType};
+use crate::config::{HamConfig, cla::ClaType, cla::ScheduleConfig};
+use crate::coordinator::{ContactCoordinator, ContactSchedule, ContactTarget};
 
 /// The standalone BPA server instance.
 pub struct HamServer {
     bpa: Arc<Bpa>,
     grpc_config: Option<hardy_proto::server::Config>,
     tcp_peers: Vec<(Arc<hardy_tcpclv4::Tcpclv4>, Vec<SocketAddr>)>,
+    coordinators: Vec<ContactCoordinator>,
     tasks: TaskPool,
 }
 
@@ -111,6 +113,7 @@ impl HamServer {
 
         // 4. Configure CLAs
         let mut tcp_peers = Vec::new();
+        let mut coordinators = Vec::new();
         for cla_config in config.clas {
             let (cla, init): (Arc<dyn Cla>, ClaInit) = match cla_config.cla_type {
                 ClaType::TcpClv4(tcp_cfg) => {
@@ -179,6 +182,100 @@ impl HamServer {
                     let init = cla.cla_init();
                     (Arc::new(cla), init)
                 }
+                ClaType::MercuryArq(mercury_cfg) => {
+                    info!(
+                        "Initializing Mercury Connected ARQ CLA '{}' (mycall={:?}, ctl={}, data={})",
+                        cla_config.name,
+                        mercury_cfg.my_callsign,
+                        mercury_cfg.control_addr,
+                        mercury_cfg.data_addr
+                    );
+
+                    let m_cfg = hardy_mercury_cla::Config {
+                        my_callsign: mercury_cfg.my_callsign.unwrap_or_else(|| {
+                            config
+                                .callsign
+                                .clone()
+                                .unwrap_or_else(|| "N0CALL".to_string())
+                        }),
+                        control_addr: mercury_cfg.control_addr,
+                        data_addr: mercury_cfg.data_addr,
+                        bandwidth: mercury_cfg.bandwidth,
+                        connect_timeout: mercury_cfg.connect_timeout,
+                        grace_period: mercury_cfg.grace_period,
+                        idle_timeout: mercury_cfg.idle_timeout,
+                        peers: mercury_cfg
+                            .peers
+                            .iter()
+                            .map(|p| hardy_mercury_cla::PeerEntry {
+                                callsign: p.callsign.clone(),
+                                node_id: Some(
+                                    p.effective_node_id().parse().expect("valid peer node ID"),
+                                ),
+                            })
+                            .collect(),
+                    };
+
+                    let cla = Arc::new(hardy_mercury_cla::MercuryCla::new(m_cfg));
+                    let init = cla.cla_init();
+
+                    let mut targets = Vec::new();
+                    for p in &mercury_cfg.peers {
+                        if let Some(ref sched) = p.schedule {
+                            let schedule = match sched {
+                                ScheduleConfig::Recurring { cron, duration } => {
+                                    let cron_expr = crate::coordinator::cron::CronExpr::parse(cron)
+                                        .map_err(|e| {
+                                            anyhow::anyhow!(
+                                                "Invalid cron for peer {}: {e}",
+                                                p.callsign
+                                            )
+                                        })?;
+                                    ContactSchedule::Recurring {
+                                        cron: cron_expr,
+                                        duration: *duration,
+                                    }
+                                }
+                                ScheduleConfig::OneShot { start, end } => {
+                                    let start_dt = start.as_ref().and_then(|s| {
+                                        time::OffsetDateTime::parse(
+                                            s,
+                                            &time::format_description::well_known::Rfc3339,
+                                        )
+                                        .ok()
+                                    });
+                                    let end_dt = end.as_ref().and_then(|s| {
+                                        time::OffsetDateTime::parse(
+                                            s,
+                                            &time::format_description::well_known::Rfc3339,
+                                        )
+                                        .ok()
+                                    });
+                                    ContactSchedule::OneShot {
+                                        start: start_dt,
+                                        end: end_dt,
+                                    }
+                                }
+                            };
+                            targets.push(ContactTarget {
+                                callsign: p.callsign.clone(),
+                                node_id: p.effective_node_id().parse().expect("valid peer node ID"),
+                                schedule,
+                                grace_period: mercury_cfg
+                                    .grace_period
+                                    .unwrap_or(std::time::Duration::from_secs(30)),
+                            });
+                        }
+                    }
+
+                    if !targets.is_empty() {
+                        let coordinator = ContactCoordinator::new(cla.clone(), targets);
+                        coordinators.push(coordinator);
+                    }
+
+                    (cla, init)
+                }
+
                 ClaType::Other { cla_type, .. } => {
                     warn!(
                         "Ignoring CLA '{}' with unsupported type '{}'",
@@ -211,14 +308,21 @@ impl HamServer {
             bpa,
             grpc_config,
             tcp_peers,
+            coordinators,
             tasks,
         })
     }
 
     /// Runs the BPA server to completion.
-    pub async fn run(self) -> anyhow::Result<()> {
+    pub async fn run(mut self) -> anyhow::Result<()> {
         info!("Starting Hamradio BPA server");
         self.bpa.start(true).await;
+
+        let coordinators = std::mem::take(&mut self.coordinators);
+        for coordinator in coordinators {
+            let cancel = self.tasks.cancel_token().clone();
+            coordinator.spawn(cancel);
+        }
 
         for (cla, addrs) in &self.tcp_peers {
             for peer_addr in addrs {

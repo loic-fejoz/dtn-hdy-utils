@@ -257,4 +257,39 @@ This demonstrates two `dtn-hdy-ham` instances interconnected via the LTP Converg
    echo "Hello STATB from STATA via LTP over Mercury KISS TNC!" | cargo run --bin dtnsend -- --port 3050 --receiver dtn://statb.ampr.org/incoming -v
    ```
 
+## Two-Station Hamradio Mercury ARQ Connected Mode (`stata-mercury.yaml` & `statb-mercury.yaml`)
+
+This demonstrates two `dtn-hdy-ham` instances interconnected via the Mercury ARQ Connected Convergence Layer (`hardy-mercury-cla`) and the scheduled `ContactCoordinator`:
+- **Mercury Bridge**: `launch_dual_mercury.sh` runs Station A (Control port 8300, Data port 8301) and Station B (Control port 8400, Data port 8401) linked across an 8 kHz acoustic simulation bridge.
+- **RADIANT Defaulting**: Specifying `callsign: "STATA"` automatically sets the node EID to `dtn://stata/` and configures the default CLA callsign. Specifying peer `callsign: "STATB"` automatically defaults the peer EID to `dtn://statb/`.
+- **Scheduled Dialing**: `stata-mercury.yaml` configures a recurring contact plan (`cron: "*/5 * * * * *"`, `duration: "30s"`) that automatically dials STATB when the window opens and tears down when expired.
+
+### Running the demonstration:
+
+1. Launch the dual Mercury TNC bridge (from the `mercury` repository):
+   ```bash
+   ../mercury/launch_dual_mercury.sh
+   ```
+
+2. Start STATB in another terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/statb-mercury.yaml
+   ```
+
+3. Start `dtnprint` on STATB:
+   ```bash
+   cargo run --bin dtnprint -- --port 3051 --service incoming --keystore /dev/null -v
+   ```
+
+4. Start STATA in a third terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/stata-mercury.yaml
+   ```
+
+5. When the scheduled contact opens (within seconds), send a bundle from STATA:
+   ```bash
+   echo "Hello STATB from STATA via Mercury ARQ Connected Mode!" | cargo run --bin dtnsend -- --port 3050 --receiver dtn://statb/incoming -v
+   ```
+
+
 

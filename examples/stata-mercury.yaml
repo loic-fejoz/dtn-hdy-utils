@@ -1,0 +1,25 @@
+# Station A (STATA) using Mercury Connected ARQ Mode (Ports 8300/8301)
+callsign: "STATA"
+
+storage:
+  in-memory: true
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3050"
+
+clas:
+  - name: "mercury-arq-a"
+    type: "mercury-arq"
+    control-addr: "127.0.0.1:8300"
+    data-addr: "127.0.0.1:8301"
+    bandwidth: 2300
+    connect-timeout: "30s"
+    grace-period: "15s"
+    idle-timeout: "25s"
+    peers:
+      - callsign: "STATB"
+        schedule:
+          type: "recurring"
+          cron: "*/5 * * * * *"
+          duration: "30s"

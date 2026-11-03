@@ -115,3 +115,49 @@ routes:
     assert_eq!(config.clas.len(), 3);
     assert_eq!(config.routes.len(), 1);
 }
+
+#[test]
+fn test_radiant_callsign_and_mercury_yaml() {
+    let yaml = r#"
+callsign: "STATA"
+storage:
+  in-memory: true
+clas:
+  - name: mercury-hf
+    type: mercury-arq
+    control-addr: "127.0.0.1:8300"
+    data-addr: "127.0.0.1:8301"
+    peers:
+      - callsign: "STATB"
+        schedule:
+          type: recurring
+          cron: "0 */15 * * * *"
+          duration: "3m"
+"#;
+
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("radiant_mercury.yaml");
+    std::fs::write(&file_path, yaml).unwrap();
+
+    let config = HamConfig::load(Some(&file_path)).expect("YAML config should parse");
+    // RADIANT callsign default for node-id
+    assert_eq!(config.callsign, Some("STATA".to_string()));
+    assert_eq!(config.node_id, "dtn://stata/");
+
+    assert_eq!(config.clas.len(), 1);
+    match &config.clas[0].cla_type {
+        ClaType::MercuryArq(m) => {
+            // Inherited callsign
+            assert_eq!(m.my_callsign, Some("STATA".to_string()));
+            assert_eq!(m.peers.len(), 1);
+            assert_eq!(m.peers[0].callsign, "STATB");
+            // RADIANT peer node-id defaulting
+            assert_eq!(m.peers[0].effective_node_id(), "dtn://statb/");
+            assert!(matches!(
+                m.peers[0].schedule,
+                Some(dtn_hdy_ham::config::cla::ScheduleConfig::Recurring { .. })
+            ));
+        }
+        _ => panic!("expected MercuryArq CLA"),
+    }
+}

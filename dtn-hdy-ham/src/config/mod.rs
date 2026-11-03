@@ -18,6 +18,11 @@ fn default_grpc_addr() -> SocketAddr {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct HamConfig {
+    /// Administrative radio callsign (e.g. `STATA` or `F4JXQ`).
+    /// If set and `node_id` is default, `node_id` defaults to `dtn://<callsign>/`.
+    #[serde(default)]
+    pub callsign: Option<String>,
+
     /// Administrative Node EID (e.g. `dtn://f4jxq.ampr.org/` or `ipn:1.0`).
     #[serde(default = "default_node_id")]
     pub node_id: String,
@@ -41,6 +46,7 @@ pub struct HamConfig {
 impl Default for HamConfig {
     fn default() -> Self {
         Self {
+            callsign: None,
             node_id: default_node_id(),
             admin_endpoints: Vec::new(),
             storage: StorageConfig::default(),
@@ -114,13 +120,34 @@ impl HamConfig {
                 .add_source(config::File::from(config_file))
                 .build()
                 .map_err(|e| anyhow::anyhow!("Failed to read configuration: {e}"))?;
-            let cfg = s
+            let mut cfg = s
                 .try_deserialize::<HamConfig>()
                 .map_err(|e| anyhow::anyhow!("Failed to parse configuration: {e}"))?;
+            cfg.normalize();
             Ok(cfg)
         } else {
             tracing::info!("No configuration file found; using default hamradio configuration");
-            Ok(Self::default())
+            let mut cfg = Self::default();
+            cfg.normalize();
+            Ok(cfg)
+        }
+    }
+
+    /// Normalizes configuration defaults, such as deriving node_id from callsign
+    /// and propagating root callsign to CLAs.
+    pub fn normalize(&mut self) {
+        if let Some(ref cs) = self.callsign {
+            if self.node_id == default_node_id() {
+                self.node_id = format!("dtn://{}/", cs.to_lowercase());
+            }
+            // Propagate callsign to CLAs that require it if missing
+            for cla in &mut self.clas {
+                if let cla::ClaType::MercuryArq(ref mut m_cfg) = cla.cla_type
+                    && m_cfg.my_callsign.is_none()
+                {
+                    m_cfg.my_callsign = Some(cs.clone());
+                }
+            }
         }
     }
 

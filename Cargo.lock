@@ -1001,6 +1001,7 @@ dependencies = [
  "hardy-localdisk-storage",
  "hardy-ltp",
  "hardy-ltp-cla",
+ "hardy-mercury-cla",
  "hardy-proto",
  "hardy-sqlite-storage",
  "hardy-tcpclv4",
@@ -1009,6 +1010,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1637,6 +1639,22 @@ dependencies = [
  "bytes",
  "hardy-ltp",
  "libfuzzer-sys",
+]
+
+[[package]]
+name = "hardy-mercury-cla"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "hardy-async",
+ "hardy-bpa",
+ "hardy-bpv7",
+ "humantime",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
