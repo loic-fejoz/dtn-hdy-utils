@@ -183,27 +183,29 @@ impl BpaService for PingApp {
         }
     }
 
-    async fn on_receive(
+    async fn on_deliver(
         &self,
-        data: Bytes,
+        _bundle_id: &hardy_bpv7::bundle::Id,
         _expiry: time::OffsetDateTime,
+        total_len: u64,
+        stream: &mut dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment>,
     ) -> hardy_bpa::services::Result<()> {
         let receive_time = std::time::Instant::now();
+        let data = hardy_bpa::stream::buffer_stream(stream, total_len).await?;
 
-        let (source, payload) =
-            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
-                Ok(parsed) => {
-                    let payload_bytes = parsed
-                        .bundle
-                        .blocks
-                        .get(&1)
-                        .and_then(|b| data.get(b.payload_range()))
-                        .map(|bytes| bytes.to_vec())
-                        .unwrap_or_else(|| data.to_vec());
-                    (parsed.bundle.id.source, payload_bytes)
-                }
-                Err(_) => (Eid::Null, data.to_vec()),
-            };
+        let (source, payload) = match hardy_bpv7::parse::parse(data.clone()) {
+            Ok(parsed) => {
+                let payload_bytes = parsed
+                    .bundle
+                    .blocks
+                    .get(&1)
+                    .and_then(|b| b.payload(&parsed.data))
+                    .map(|bytes| bytes.to_vec())
+                    .unwrap_or_else(|| data.to_vec());
+                (parsed.bundle.primary.id.source, payload_bytes)
+            }
+            Err(_) => (Eid::Null, data.to_vec()),
+        };
 
         if self.policy != VerifyPolicy::Ignore {
             let res = verify_bundle(&data, &self.keystore);
@@ -681,7 +683,7 @@ async fn main() -> anyhow::Result<()> {
                             .parse::<Eid>()
                             .map_err(|e| anyhow::anyhow!("Invalid security source EID: {e}"))?
                     } else {
-                        bundle.id.source.clone()
+                        bundle.primary.id.source.clone()
                     };
                     if args.verbose {
                         eprintln!("Signing ping bundle with HMAC-SHA256...");
@@ -698,7 +700,7 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 let send_time = std::time::Instant::now();
-                match sink.send(Bytes::from(binbundle)).await {
+                match sink.send(&mut Bytes::from(binbundle)).await {
                     Ok(bundle_id) => {
                         let mut s = state.lock().unwrap();
                         s.sent += 1;

@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand};
+#[cfg(test)]
+use hardy_bpa::bundle::StoredBundleRef;
+use hardy_bpa::bundle::{BundleStatus, StoredBundle};
 use hardy_bpv7::bundle::Id as Bpv7Id;
 use rusqlite::Connection;
 use sha1::{Digest, Sha1};
@@ -197,13 +200,14 @@ fn query_sqlite(db_path: &std::path::Path) -> anyhow::Result<Vec<BundleInfo>> {
             Ok(parsed_id) => parsed_id,
             Err(_) => continue,
         };
-        let bpa_bundle: hardy_bpa::bundle::Bundle = match serde_json::from_slice(&bundle_bytes) {
+        let stored: StoredBundle = match serde_json::from_slice(&bundle_bytes) {
             Ok(b) => b,
             Err(_) => continue,
         };
-        let dest_eid = bpa_bundle.bundle.destination.to_string();
+        let bpa_bundle = stored.into_bundle(BundleStatus::New);
+        let dest_eid = bpa_bundle.bpv7.primary.destination.to_string();
         let size = bpa_bundle
-            .bundle
+            .bpv7
             .blocks
             .values()
             .map(|b| b.extent.end)
@@ -229,7 +233,7 @@ fn query_sqlite(db_path: &std::path::Path) -> anyhow::Result<Vec<BundleInfo>> {
             source: bpv7_id.source.to_string(),
             destination: dest_eid,
             creation_time,
-            size,
+            size: size as usize,
             status,
         });
     }
@@ -254,13 +258,14 @@ async fn query_postgres(database_url: &str) -> anyhow::Result<Vec<BundleInfo>> {
             Err(_) => continue,
         };
 
-        let bpa_bundle: hardy_bpa::bundle::Bundle = match serde_json::from_slice(&json_bytes) {
+        let stored: StoredBundle = match serde_json::from_slice(&json_bytes) {
             Ok(b) => b,
             Err(_) => continue,
         };
-        let dest_eid = bpa_bundle.bundle.destination.to_string();
+        let bpa_bundle = stored.into_bundle(BundleStatus::New);
+        let dest_eid = bpa_bundle.bpv7.primary.destination.to_string();
         let size = bpa_bundle
-            .bundle
+            .bpv7
             .blocks
             .values()
             .map(|b| b.extent.end)
@@ -286,7 +291,7 @@ async fn query_postgres(database_url: &str) -> anyhow::Result<Vec<BundleInfo>> {
             source: bpv7_id.source.to_string(),
             destination: dest_eid,
             creation_time,
-            size,
+            size: size as usize,
             status,
         });
     }
@@ -525,19 +530,19 @@ storage:
 
         // Construct mock bundle
         let mut bpa_bundle = hardy_bpa::bundle::Bundle {
-            bundle: hardy_bpv7::bundle::Bundle {
-                id: bpv7_id.clone(),
-                flags: Default::default(),
-                crc_type: hardy_bpv7::crc::CrcType::None,
-                destination: "dtn://my-destination/".parse().unwrap(),
-                report_to: "dtn://my-report/".parse().unwrap(),
-                lifetime: core::time::Duration::from_secs(3600),
-                previous_node: None,
-                age: None,
-                hop_count: None,
+            bpv7: hardy_bpv7::bundle::Bundle {
+                primary: hardy_bpv7::primary_block::PrimaryBlock {
+                    id: bpv7_id.clone(),
+                    flags: Default::default(),
+                    crc_type: hardy_bpv7::crc::CrcType::None,
+                    destination: "dtn://my-destination/".parse().unwrap(),
+                    report_to: "dtn://my-report/".parse().unwrap(),
+                    lifetime: core::time::Duration::from_secs(3600),
+                },
                 blocks: std::collections::HashMap::new(),
             },
-            metadata: Default::default(),
+            metadata: hardy_bpa::bundle::BundleMetadata::originated(),
+            status: BundleStatus::New,
         };
 
         // Add a dummy block to blocks map to verify size calculation
@@ -545,9 +550,9 @@ storage:
             extent: 0..128,
             ..Default::default()
         };
-        bpa_bundle.bundle.blocks.insert(1, dummy_block);
+        bpa_bundle.bpv7.blocks.insert(1, dummy_block);
 
-        let bundle_bytes = serde_json::to_vec(&bpa_bundle)?;
+        let bundle_bytes = serde_json::to_vec(&StoredBundleRef::from(&bpa_bundle))?;
 
         // Insert into database
         conn.execute(

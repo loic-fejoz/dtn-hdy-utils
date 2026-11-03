@@ -249,31 +249,33 @@ impl BpaService for StatsApp {
         std::process::exit(1);
     }
 
-    async fn on_receive(
+    async fn on_deliver(
         &self,
-        data: Bytes,
+        _bundle_id: &hardy_bpv7::bundle::Id,
         _expiry: time::OffsetDateTime,
+        total_len: u64,
+        stream: &mut dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment>,
     ) -> hardy_bpa::services::Result<()> {
+        let data = hardy_bpa::stream::buffer_stream(stream, total_len).await?;
         if self.verbose {
             eprintln!("Received stats query bundle (len: {})", data.len());
         }
 
         // Parse raw bundle
-        let parsed =
-            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Failed to parse incoming bundle: {}", e);
-                    return Ok(());
-                }
-            };
+        let parsed = match hardy_bpv7::parse::parse(data.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Failed to parse incoming bundle: {}", e);
+                return Ok(());
+            }
+        };
         let request_bundle = parsed.bundle;
 
         // Prioritize report_to, then source
-        let reply_dest = if let Eid::Null = request_bundle.report_to {
-            request_bundle.id.source.clone()
+        let reply_dest = if let Eid::Null = request_bundle.primary.report_to {
+            request_bundle.primary.id.source.clone()
         } else {
-            request_bundle.report_to.clone()
+            request_bundle.primary.report_to.clone()
         };
 
         if let Eid::Null = reply_dest {
@@ -324,7 +326,7 @@ impl BpaService for StatsApp {
                 if verbose {
                     eprintln!("Sending response bundle to {}", reply_dest);
                 }
-                if let Err(e) = sink.send(Bytes::from(binbundle)).await {
+                if let Err(e) = sink.send(&mut Bytes::from(binbundle)).await {
                     eprintln!("Failed to send stats response: {}", e);
                 }
             }

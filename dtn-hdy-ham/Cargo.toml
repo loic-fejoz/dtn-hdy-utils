@@ -1,0 +1,39 @@
+[package]
+name = "dtn-hdy-ham"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hardy BPv7 bundle processing agent dedicated to amateur radio operators"
+
+[features]
+default = []
+instrument = ["hardy-async/instrument", "hardy-bpa/instrument", "tracing/attributes"]
+
+[dependencies]
+hardy-async = { version = "0.2", path = "../../hardy/async", features = ["watcher"] }
+hardy-bpa = { version = "0.2", path = "../../hardy/bpa", default-features = false, features = ["serde", "rfc9173", "tokio"] }
+hardy-bpv7 = { version = "0.6", path = "../../hardy/bpv7", features = ["serde"] }
+hardy-eid-patterns = { version = "0.4", path = "../../hardy/eid-patterns", features = ["serde", "dtn-pat-item"] }
+hardy-proto = { version = "0.2", path = "../../hardy/proto", features = ["serde"] }
+hardy-sqlite-storage = { version = "0.6", path = "../../hardy/sqlite-storage" }
+hardy-localdisk-storage = { version = "0.6", path = "../../hardy/localdisk-storage" }
+hardy-tcpclv4 = { version = "0.4", path = "../../hardy/tcpclv4", features = ["serde"] }
+hardy-ltp-cla = { version = "0.1", path = "../ltp-cla", features = ["serde"] }
+hardy-hqfbp-cla = { version = "0.1", path = "../hqfbp-cla", features = ["serde", "serial"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "net"] }
+config = { version = "0.15", features = ["yaml", "toml", "json"] }
+humantime = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "2"
+directories = "5"
+
+[dev-dependencies]
+tempfile = "3"
+hardy-ltp = { path = "../ltp" }

@@ -195,3 +195,31 @@ The `dtn-ecowitt.py` script queries real-time weather data from the Ecowitt HTTP
        --lifetime 7200
    ```
 
+## Two-Station Hamradio BPA Test (`stata.yaml` & `statb.yaml`)
+
+This demonstrates two `dtn-hdy-ham` instances interconnected via TCPCLv4:
+- `STATA` (`examples/stata.yaml`): Node EID `dtn://stata.ampr.org/`, gRPC port `3050`, TCPCL port `4551`, connecting to STATB on `127.0.0.1:4552`.
+- `STATB` (`examples/statb.yaml`): Node EID `dtn://statb.ampr.org/`, gRPC port `3051`, TCPCL listening on `127.0.0.1:4552`.
+
+### Running the demonstration:
+
+1. Start STATB in one terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/statb.yaml
+   ```
+
+2. Start STATA in a second terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/stata.yaml
+   ```
+
+3. Listen for bundles on STATB using `dtnprint`:
+   ```bash
+   cargo run --bin dtnprint -- --port 3051 --service incoming --keystore /dev/null -v
+   ```
+
+4. Transmit a bundle from STATA to STATB using `dtnsend`:
+   ```bash
+   echo "Hello STATB from STATA via TCPCL!" | cargo run --bin dtnsend -- --port 3050 --receiver dtn://statb.ampr.org/incoming -v
+   ```
+

@@ -1,7 +1,6 @@
 pub mod basket;
 pub mod security;
 
-use bytes::Bytes;
 use hardy_bpa::async_trait;
 use hardy_bpa::cla::{Cla as BpaCla, ForwardBundleResult, Sink as ClaSink};
 use hardy_bpv7::eid::NodeId;
@@ -58,7 +57,12 @@ impl Default for NoopSenderCla {
 
 #[async_trait]
 impl BpaCla for NoopSenderCla {
-    async fn on_register(&self, sink: Box<dyn ClaSink>, _node_ids: &[NodeId]) {
+    async fn on_register(
+        &self,
+        sink: Box<dyn ClaSink>,
+        _node_ids: &[NodeId],
+        _max_bundle_size: Option<std::num::NonZeroU64>,
+    ) {
         let _ = self.sink.set(sink);
     }
 
@@ -69,7 +73,8 @@ impl BpaCla for NoopSenderCla {
         _queue: Option<u32>,
         _cla_addr: &hardy_bpa::cla::ClaAddress,
         _bundle_id: &hardy_bpv7::bundle::Id,
-        _bundle: Bytes,
+        _total_len: u64,
+        _stream: &mut (dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment> + '_),
     ) -> hardy_bpa::cla::Result<ForwardBundleResult> {
         Ok(ForwardBundleResult::Sent)
     }

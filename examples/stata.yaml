@@ -1,0 +1,16 @@
+# Configuration for Station A (STATA)
+node-id: "dtn://stata.ampr.org/"
+storage:
+  in-memory: true
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3050"
+
+clas:
+  - name: "tcpcl-stata"
+    type: "tcpclv4"
+    address: "127.0.0.1:4551"
+    require-tls: false
+    peers:
+      - "127.0.0.1:4552"

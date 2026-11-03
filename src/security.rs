@@ -3,12 +3,10 @@ use clap::ValueEnum;
 use hardy_bpv7::bpsec::key::{Key, KeyAlgorithm, KeySource, Operation, Type};
 use hardy_bpv7::bpsec::rfc9173::ScopeFlags;
 use hardy_bpv7::bpsec::signer::{Context as SignerContext, Signer};
-use hardy_bpv7::bundle::ParsedBundle;
 use hardy_bpv7::eid::Eid;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 /// Supported signature algorithms for bundle authentication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -69,9 +67,7 @@ impl KeyStore {
     /// Add a key entry manually for an EID pattern.
     pub fn add_key(&mut self, eid_pattern: impl Into<String>, key_bytes: &[u8]) {
         let key = Key {
-            key_type: Type::OctetSequence {
-                key: key_bytes.to_vec().into_boxed_slice(),
-            },
+            key_type: Type::octet_sequence(key_bytes),
             key_algorithm: Some(KeyAlgorithm::HS256),
             operations: Some([Operation::Sign, Operation::Verify].into_iter().collect()),
             ..Default::default()
@@ -259,17 +255,16 @@ pub fn sign_bundle(
     key_mat: &KeyMaterial,
     security_source: Option<Eid>,
 ) -> Result<(hardy_bpv7::bundle::Bundle, Vec<u8>)> {
-    let parsed_bundle = ParsedBundle::parse(binbundle, hardy_bpv7::bpsec::no_keys)
+    let parsed_bundle = hardy_bpv7::parse::parse(bytes::Bytes::copy_from_slice(binbundle))
         .map_err(|e| anyhow!("Failed to parse bundle for signing: {e}"))?;
 
-    let sec_source = security_source.unwrap_or_else(|| parsed_bundle.bundle.id.source.clone());
+    let sec_source =
+        security_source.unwrap_or_else(|| parsed_bundle.bundle.primary.id.source.clone());
 
     let key_bytes = key_mat.raw.clone();
 
     let key = Key {
-        key_type: Type::OctetSequence {
-            key: key_bytes.into_boxed_slice(),
-        },
+        key_type: Type::octet_sequence(key_bytes),
         key_algorithm: Some(KeyAlgorithm::HS256),
         operations: Some([Operation::Sign].into_iter().collect()),
         ..Default::default()
@@ -289,90 +284,93 @@ pub fn sign_bundle(
         .rebuild()
         .map_err(|e| anyhow!("Failed to rebuild signed bundle: {e}"))?;
 
-    let signed_parsed = ParsedBundle::parse(&signed_bytes, hardy_bpv7::bpsec::no_keys)
+    let signed_parsed = hardy_bpv7::parse::parse(bytes::Bytes::copy_from_slice(&signed_bytes))
         .map_err(|e| anyhow!("Failed to parse newly signed bundle: {e}"))?;
 
     Ok((signed_parsed.bundle, signed_bytes.into_vec()))
 }
 
-struct CapturingKeySource {
-    keystore: KeyStore,
-    captured_source: Arc<Mutex<Option<Eid>>>,
-}
-
-impl KeySource for CapturingKeySource {
-    fn key<'b>(&'b self, source: &Eid, operations: &[Operation]) -> Option<&'b Key> {
-        if let Ok(mut guard) = self.captured_source.lock() {
-            *guard = Some(source.clone());
-        }
-        self.keystore.key(source, operations)
-    }
-}
-
 /// Verify bundle authentication using the provided KeyStore.
 pub fn verify_bundle(binbundle: &[u8], keystore: &KeyStore) -> VerifyResult {
-    let captured_source = Arc::new(Mutex::new(None));
-    let captured_clone = Arc::clone(&captured_source);
-    let ks = keystore.clone();
-
-    let checked_res = hardy_bpv7::bundle::CheckedBundle::parse(binbundle, move |_, _| {
-        Box::new(CapturingKeySource {
-            keystore: ks,
-            captured_source: captured_clone,
-        }) as Box<dyn KeySource>
-    });
-
-    match checked_res {
-        Ok(checked) => {
-            let has_bib = checked
-                .bundle
-                .blocks
-                .values()
-                .any(|b| matches!(b.block_type, hardy_bpv7::block::Type::BlockIntegrity));
-
-            if has_bib {
-                let sec_source_opt = captured_source
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                if let Some(sec_source) = sec_source_opt {
-                    let matching_keys = keystore.find_keys(&sec_source);
-                    if matching_keys.is_empty() {
-                        VerifyResult::Invalid(format!(
-                            "Missing key for security source {}",
-                            sec_source
-                        ))
-                    } else {
-                        VerifyResult::Valid
-                    }
-                } else {
-                    let sec_source = checked.bundle.id.source.clone();
-                    let matching_keys = keystore.find_keys(&sec_source);
-                    if matching_keys.is_empty() {
-                        VerifyResult::Invalid(format!(
-                            "Missing key for security source {}",
-                            sec_source
-                        ))
-                    } else {
-                        VerifyResult::Valid
-                    }
-                }
-            } else {
-                VerifyResult::Unsigned
-            }
-        }
+    let parsed = match hardy_bpv7::parse::parse(bytes::Bytes::copy_from_slice(binbundle)) {
+        Ok(p) => p,
         Err(e) => {
             let err_msg = e.to_string();
             if err_msg.contains("expecting Array")
                 || err_msg.contains("violates RFC 9171 canonical CBOR")
                 || err_msg.contains("NotCanonical")
             {
-                VerifyResult::Unsigned
+                return VerifyResult::Unsigned;
             } else {
-                VerifyResult::Invalid(err_msg)
+                return VerifyResult::Invalid(err_msg);
             }
         }
+    };
+
+    let has_bib = !parsed.bibs.is_empty()
+        || parsed
+            .bundle
+            .blocks
+            .values()
+            .any(|b| matches!(b.block_type, hardy_bpv7::block::Type::BlockIntegrity));
+
+    if !has_bib {
+        return VerifyResult::Unsigned;
     }
+
+    // Check for missing keys
+    for ops in parsed.bibs.values() {
+        let sec_source = ops.source();
+        let matching_keys = keystore.find_keys(sec_source);
+        if matching_keys.is_empty() {
+            return VerifyResult::Invalid(format!(
+                "Missing key for security source {}",
+                sec_source
+            ));
+        }
+    }
+
+    let empty_decrypted = std::collections::HashMap::default();
+    let empty_updates = std::collections::HashMap::default();
+
+    if let Err(e) = hardy_bpv7::checks::verify_all_bibs(
+        &parsed.data,
+        keystore,
+        &parsed.bundle.blocks,
+        &parsed.bibs,
+        &empty_decrypted,
+        &empty_updates,
+    ) {
+        return VerifyResult::Invalid(e.to_string());
+    }
+
+    let verifiers_res = hardy_bpv7::checks::begin_payload_verification(
+        &parsed.data,
+        keystore,
+        &parsed.bundle.blocks,
+        &parsed.bibs,
+    );
+    let verifiers = match verifiers_res {
+        Ok(v) => v,
+        Err(e) => return VerifyResult::Invalid(e.to_string()),
+    };
+
+    let payload_slice = parsed
+        .bundle
+        .blocks
+        .get(&1)
+        .and_then(|b| b.payload(&parsed.data))
+        .unwrap_or(&[]);
+
+    for (_, verifier) in verifiers.into_iter() {
+        let mut v = verifier;
+        v.update(payload_slice);
+        if let Err(e) = v.finish() {
+            return VerifyResult::Invalid(e.to_string());
+        }
+    }
+
+    VerifyResult::Valid
 }
 
 /// Sign a bundle if key material is supplied.

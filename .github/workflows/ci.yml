@@ -26,7 +26,14 @@ jobs:
         with:
           repository: ricktaylor/hardy
           path: hardy
-          ref: 'e7694992598f725ecfa3919a5de8105cd48956fe'
+          ref: '260fe751a0d8058d3a438d3b588bc05502bd1727'
+
+      - name: Checkout hqfbp-rs dependency
+        uses: actions/checkout@v4
+        with:
+          repository: loic-fejoz/hqfbp-rs
+          path: hqfbp-rs
+          ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
@@ -94,7 +101,14 @@ jobs:
         with:
           repository: ricktaylor/hardy
           path: hardy
-          ref: 'e7694992598f725ecfa3919a5de8105cd48956fe'
+          ref: '260fe751a0d8058d3a438d3b588bc05502bd1727'
+
+      - name: Checkout hqfbp-rs dependency
+        uses: actions/checkout@v4
+        with:
+          repository: loic-fejoz/hqfbp-rs
+          path: hqfbp-rs
+          ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
@@ -122,6 +136,7 @@ jobs:
             "dtnbib"
             "dtnfiles"
             "dtnforward"
+            "dtn-hdy-ham"
             "dtnping"
             "dtnprint"
             "dtnquery"

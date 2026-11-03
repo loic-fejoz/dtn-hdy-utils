@@ -8,7 +8,6 @@ use hardy_bpa::bpa::BpaRegistration;
 use hardy_bpa::services::{Service as BpaService, ServiceSink};
 use hardy_bpv7::{
     builder::Builder,
-    bundle::ParsedBundle,
     eid::{Eid, Service},
 };
 use hardy_proto::client::RemoteBpa;
@@ -93,10 +92,7 @@ impl BibService {
             hardy_cbor::decode::parse_array(payload_data, |arr, _, _| {
                 let record_type: u32 = arr.parse::<(u32, bool)>().map(|(v, _)| v)?;
                 if record_type != 64443 {
-                    return Err(hardy_cbor::decode::Error::IncorrectType(
-                        "64443".to_string(),
-                        record_type.to_string(),
-                    ));
+                    return Err(hardy_cbor::decode::Error::UnexpectedTag);
                 }
 
                 let arr_offset = arr.offset();
@@ -126,8 +122,8 @@ impl BibService {
                                 Ok(acc)
                             }
                             _ => Err(hardy_cbor::decode::Error::IncorrectType(
-                                "Byte String".to_string(),
-                                "other".to_string(),
+                                "Byte String",
+                                value.item_type(&[]),
                             )),
                         });
                     res
@@ -163,17 +159,20 @@ impl BpaService for BibService {
         std::process::exit(1);
     }
 
-    async fn on_receive(
+    async fn on_deliver(
         &self,
-        data: Bytes,
+        _id: &hardy_bpv7::bundle::Id,
         _expiry: time::OffsetDateTime,
+        total_len: u64,
+        stream: &mut dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment>,
     ) -> hardy_bpa::services::Result<()> {
+        let data = hardy_bpa::stream::buffer_stream(stream, total_len).await?;
         if self.verbose {
             eprintln!("Received outer bundle CBOR of size {} bytes.", data.len());
         }
 
         // 1. Parse the outer bundle structure
-        let outer_parsed = match ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
+        let outer_parsed = match hardy_bpv7::parse::parse(data.clone()) {
             Ok(parsed) => parsed,
             Err(e) => {
                 eprintln!("WARNING: Failed to parse outer bundle: {}", e);
@@ -183,7 +182,7 @@ impl BpaService for BibService {
 
         // 2. Extract outer bundle payload block content
         let outer_payload = match outer_parsed.bundle.blocks.get(&1) {
-            Some(block) => match block.payload(&data) {
+            Some(block) => match block.payload(&outer_parsed.data) {
                 Some(payload) => payload,
                 None => {
                     eprintln!("WARNING: Failed to extract payload from outer bundle.");
@@ -217,22 +216,21 @@ impl BpaService for BibService {
         };
 
         // 2. Parse inner bundle structure
-        let inner_parsed =
-            match ParsedBundle::parse(&inner_bundle_bytes, hardy_bpv7::bpsec::no_keys) {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    eprintln!("WARNING: Failed to parse inner bundle: {}", e);
-                    return Ok(());
-                }
-            };
+        let inner_parsed = match hardy_bpv7::parse::parse(Bytes::from(inner_bundle_bytes.clone())) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!("WARNING: Failed to parse inner bundle: {}", e);
+                return Ok(());
+            }
+        };
 
-        let inner_source = inner_parsed.bundle.id.source.clone();
-        let inner_dest = inner_parsed.bundle.destination.clone();
+        let inner_source = inner_parsed.bundle.primary.id.source.clone();
+        let inner_dest = inner_parsed.bundle.primary.destination.clone();
 
         if self.verbose {
             eprintln!(
                 "Decapsulated inner bundle: id={} source={} destination={}",
-                inner_parsed.bundle.id.to_key(),
+                inner_parsed.bundle.primary.id.to_key(),
                 inner_source,
                 inner_dest
             );
@@ -308,7 +306,7 @@ impl BpaService for BibService {
         let (final_bundle, final_binbundle) = if eid_was_rewritten {
             // Extract original payload bytes from inner bundle
             let inner_payload = match inner_parsed.bundle.blocks.get(&1) {
-                Some(block) => match block.payload(&inner_bundle_bytes) {
+                Some(block) => match block.payload(&inner_parsed.data) {
                     Some(payload) => payload,
                     None => {
                         eprintln!("WARNING: Failed to extract payload from inner bundle.");
@@ -323,13 +321,13 @@ impl BpaService for BibService {
 
             // Rebuild inner bundle structure with rewritten destination EID
             let (rebuilt_bundle, rebuilt_binbundle) = match Builder::new(
-                inner_parsed.bundle.id.source.clone(),
+                inner_parsed.bundle.primary.id.source.clone(),
                 rewritten_dest.clone(),
             )
-            .with_lifetime(inner_parsed.bundle.lifetime)
-            .with_flags(inner_parsed.bundle.flags)
+            .with_lifetime(inner_parsed.bundle.primary.lifetime)
+            .with_flags(inner_parsed.bundle.primary.flags)
             .with_payload(std::borrow::Cow::Borrowed(inner_payload))
-            .build(inner_parsed.bundle.id.timestamp.clone())
+            .build(inner_parsed.bundle.primary.id.timestamp.clone())
             {
                 Ok(res) => res,
                 Err(e) => {
@@ -353,22 +351,25 @@ impl BpaService for BibService {
                     }
                 } else {
                     // Find key matching original sender in keystore
-                    let matching_keys = self.keystore.find_keys(&inner_parsed.bundle.id.source);
+                    let matching_keys = self
+                        .keystore
+                        .find_keys(&inner_parsed.bundle.primary.id.source);
                     if let Some(key) = matching_keys.first() {
                         if let hardy_bpv7::bpsec::key::Type::OctetSequence { key } = &key.key_type {
-                            key_to_use =
-                                Some(dtn_hdy_utils::security::KeyMaterial { raw: key.to_vec() });
+                            key_to_use = Some(dtn_hdy_utils::security::KeyMaterial {
+                                raw: key.expose_secret().to_vec(),
+                            });
                             if self.verbose {
                                 eprintln!(
                                     "Found matching key for original sender {} in keystore. Using it to re-sign.",
-                                    inner_parsed.bundle.id.source
+                                    inner_parsed.bundle.primary.id.source
                                 );
                             }
                         }
                     } else if self.verbose {
                         eprintln!(
                             "WARNING: No matching key for original sender {} found in keystore to re-sign inner bundle.",
-                            inner_parsed.bundle.id.source
+                            inner_parsed.bundle.primary.id.source
                         );
                     }
                 }
@@ -379,7 +380,7 @@ impl BpaService for BibService {
                     .security_source
                     .as_ref()
                     .and_then(|s| s.parse::<Eid>().ok())
-                    .or_else(|| Some(inner_parsed.bundle.id.source.clone()));
+                    .or_else(|| Some(inner_parsed.bundle.primary.id.source.clone()));
 
                 if self.verbose {
                     eprintln!("Re-signing rewritten inner bundle...");
@@ -405,14 +406,12 @@ impl BpaService for BibService {
 
         // 7. Re-inject into local BPA
         if let Some(sink) = self.sender_cla.sink.get() {
-            match sink
-                .dispatch(Bytes::from(final_binbundle), None, None)
-                .await
-            {
+            let mut bundle_stream = Bytes::from(final_binbundle);
+            match sink.dispatch(None, None, &mut bundle_stream).await {
                 Ok(_) => {
                     eprintln!(
                         "Re-injected inner bundle: {} -> {}",
-                        final_bundle.id.to_key(),
+                        final_bundle.primary.id.to_key(),
                         rewritten_dest
                     );
                 }
@@ -464,7 +463,12 @@ async fn main() -> anyhow::Result<()> {
     let mut node_ids = None;
     for i in 0..5 {
         match remote_bpa
-            .register_cla(cla_name.clone(), sender_cla.clone(), None)
+            .register_cla(
+                cla_name.clone(),
+                sender_cla.clone(),
+                None,
+                hardy_bpa::cla::ClaInit::default(),
+            )
             .await
         {
             Ok(ids) => {
