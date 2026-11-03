@@ -16,10 +16,10 @@ clas:
     bandwidth: 2300
     connect-timeout: "30s"
     grace-period: "15s"
-    idle-timeout: "25s"
+    idle-timeout: "45s"
     peers:
       - callsign: "STATB"
         schedule:
           type: "recurring"
-          cron: "*/5 * * * * *"
-          duration: "30s"
+          cron: "*/10 * * * * *"
+          duration: "60s"
