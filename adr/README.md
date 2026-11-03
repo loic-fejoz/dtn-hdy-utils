@@ -11,3 +11,5 @@ This directory contains records of the major architectural and design decisions 
 5. [ADR 5: Design and Strategy for `dtntrigger` Utility](0005-design-dtntrigger-utility.md) *(Superseded by ADR 7)*
 6. [ADR 6: Design and Strategy for `dtnping` Utility](0006-design-dtnping-utility.md) *(Superseded by ADR 7)*
 7. [ADR 7: BPSec Security Integration and Service API Migration](0007-bpsec-security-integration.md)
+8. [ADR 8: Mercury Connected CLA and Shared Contact Coordinator](0008-mercury-connected-cla-and-contact-coordinator.md)
+
