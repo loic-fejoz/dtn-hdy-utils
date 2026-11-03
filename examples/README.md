@@ -223,3 +223,38 @@ This demonstrates two `dtn-hdy-ham` instances interconnected via TCPCLv4:
    echo "Hello STATB from STATA via TCPCL!" | cargo run --bin dtnsend -- --port 3050 --receiver dtn://statb.ampr.org/incoming -v
    ```
 
+## Two-Station Hamradio LTP over Mercury TNC (`stata-ltp.yaml` & `statb-ltp.yaml`)
+
+This demonstrates two `dtn-hdy-ham` instances interconnected via the LTP Convergence Layer Adapter (`hardy-ltp-cla`) using Mercury TNC KISS TCP interfaces over simulated audio channels (`launch_dual_mercury.sh`):
+- **Mercury Bridge**: Runs two Mercury TNC instances linked by an 8 kHz real-time audio FIFO bridge. Station A exposes KISS TCP on `127.0.0.1:8100`, Station B on `127.0.0.1:8500`.
+- `STATA` (`examples/stata-ltp.yaml`): Node EID `dtn://stata.ampr.org/`, gRPC port `3050`, LTP Engine ID `1`, KISS TCP client connected to `127.0.0.1:8100`, peer Engine ID `2` (`dtn://statb.ampr.org/`).
+- `STATB` (`examples/statb-ltp.yaml`): Node EID `dtn://statb.ampr.org/`, gRPC port `3051`, LTP Engine ID `2`, KISS TCP client connected to `127.0.0.1:8500`, peer Engine ID `1` (`dtn://stata.ampr.org/`).
+
+### Running the demonstration:
+
+1. Launch the dual Mercury TNC bridge (from the `mercury` repository):
+   ```bash
+   ../mercury/launch_dual_mercury.sh
+   ```
+
+2. Start STATB in another terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/statb-ltp.yaml
+   ```
+
+3. Start STATA in a third terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/stata-ltp.yaml
+   ```
+
+4. Listen for bundles on STATB using `dtnprint`:
+   ```bash
+   cargo run --bin dtnprint -- --port 3051 --service incoming --keystore /dev/null -v
+   ```
+
+5. Transmit a bundle from STATA to STATB using `dtnsend`:
+   ```bash
+   echo "Hello STATB from STATA via LTP over Mercury KISS TNC!" | cargo run --bin dtnsend -- --port 3050 --receiver dtn://statb.ampr.org/incoming -v
+   ```
+
+

@@ -1,0 +1,22 @@
+# Station A (STATA) using LTP over Mercury TCP KISS (Station A broadcast port 8100)
+node-id: "dtn://stata.ampr.org/"
+storage:
+  in-memory: true
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3050"
+
+clas:
+  - name: "ltp-mercury-a"
+    type: "ltp"
+    engine-id: 1
+    max-segment-payload-len: 80
+    rtt: "3s"
+    ack-margin: "2s"
+    transport:
+      type: "kiss-tcp"
+      server-addr: "127.0.0.1:8100"
+    peers:
+      - engine-id: 2
+        node-id: "dtn://statb.ampr.org/"
