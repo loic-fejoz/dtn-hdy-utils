@@ -4,7 +4,6 @@ pub mod injector;
 pub mod routes;
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -25,12 +24,28 @@ pub struct AppState {
 
 /// Builds the Axum router with API endpoints and SPA static asset fallback.
 pub fn create_router(state: AppState) -> Router {
-    let static_dir = state
+    let mut static_dir = state
         .config
         .web
         .as_ref()
         .map(|w| w.static_dir.clone())
-        .unwrap_or_else(|| PathBuf::from("dtn-hdy-ham/web/dist"));
+        .unwrap_or_else(crate::config::default_web_static_dir);
+
+    // If configured path does not exist directly, check relative to executable directory
+    if !static_dir.exists()
+        && let Ok(exe) = std::env::current_exe()
+    {
+        let exe_dir = exe.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let candidate = exe_dir.join(&static_dir);
+        if candidate.exists() {
+            static_dir = candidate;
+        } else {
+            let alt = exe_dir.join("web").join("dist");
+            if alt.exists() {
+                static_dir = alt;
+            }
+        }
+    }
 
     let index_file = static_dir.join("index.html");
 

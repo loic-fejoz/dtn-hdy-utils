@@ -96,8 +96,21 @@ fn default_web_addr() -> SocketAddr {
     "127.0.0.1:8088".parse().expect("valid address")
 }
 
-fn default_web_static_dir() -> PathBuf {
-    PathBuf::from("dtn-hdy-ham/web/dist")
+pub fn default_web_static_dir() -> PathBuf {
+    if Path::new("web/dist").exists() {
+        PathBuf::from("web/dist")
+    } else if Path::new("dtn-hdy-ham/web/dist").exists() {
+        PathBuf::from("dtn-hdy-ham/web/dist")
+    } else if let Ok(exe) = std::env::current_exe() {
+        let exe_dir = exe.parent().unwrap_or_else(|| Path::new("."));
+        let candidate = exe_dir.join("web").join("dist");
+        if candidate.exists() {
+            return candidate;
+        }
+        PathBuf::from("web/dist")
+    } else {
+        PathBuf::from("web/dist")
+    }
 }
 
 /// Web dashboard and REST API interface settings.
