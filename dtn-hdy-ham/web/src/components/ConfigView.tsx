@@ -1,6 +1,12 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
 
+export interface ActiveService {
+  eid: string;
+  type: string;
+  registered_at: string;
+}
+
 export interface StationConfig {
   status: string;
   version: string;
@@ -33,12 +39,13 @@ export interface StationConfig {
 
 interface ConfigViewProps {
   config: StationConfig | null;
+  services?: ActiveService[];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
 }
 
-export function ConfigView({ config, loading, error, onRefresh }: ConfigViewProps) {
+export function ConfigView({ config, services, loading, error, onRefresh }: ConfigViewProps) {
   const [showRawJson, setShowRawJson] = useState(false);
 
   if (loading && !config) {
@@ -191,6 +198,48 @@ export function ConfigView({ config, loading, error, onRefresh }: ConfigViewProp
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Active DTN Services Card */}
+      <div class="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-4 mb-4">
+          <div class="flex items-center space-x-2">
+            <span class="text-lg">🛎️</span>
+            <h3 class="text-base font-bold text-slate-900 dark:text-white">
+              Active DTN Services
+            </h3>
+          </div>
+          <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
+            {services?.length || 0} active
+          </span>
+        </div>
+
+        {(!services || services.length === 0) ? (
+          <p class="text-sm text-slate-500 dark:text-slate-400 italic">No services currently registered.</p>
+        ) : (
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {services.map((svc) => (
+              <div class="border border-slate-200 dark:border-slate-700 rounded-xl p-4 bg-slate-50/50 dark:bg-slate-800/50 hover:border-emerald-500/50 transition flex flex-col justify-between">
+                <div class="flex items-start justify-between gap-2">
+                  <span class="font-bold text-sm text-emerald-600 dark:text-emerald-400 font-mono break-all">
+                    {svc.eid}
+                  </span>
+                  <span class={`px-2 py-0.5 text-[11px] rounded-md font-semibold whitespace-nowrap ${
+                    svc.type.includes('Echo')
+                      ? 'bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-300'
+                      : 'bg-sky-100 dark:bg-sky-900/60 text-sky-800 dark:text-sky-300'
+                  }`}>
+                    {svc.type}
+                  </span>
+                </div>
+                <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                  <span>Registered:</span>
+                  <span class="font-mono text-[11px] text-slate-700 dark:text-slate-300">{svc.registered_at}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Convergence Layer Adapters Card */}

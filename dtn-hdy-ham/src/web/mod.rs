@@ -20,6 +20,7 @@ use crate::web::injector::WebBundleInjector;
 pub struct AppState {
     pub config: Arc<HamConfig>,
     pub injector: WebBundleInjector,
+    pub service_tracker: crate::service_tracker::ServiceTracker,
 }
 
 /// Builds the Axum router with API endpoints and SPA static asset fallback.
@@ -51,6 +52,8 @@ pub fn create_router(state: AppState) -> Router {
 
     let api_routes = Router::new()
         .route("/config", get(routes::config::get_config))
+        .route("/services", get(routes::services::get_services))
+        .route("/events", get(routes::services::sse_events))
         .route("/bundles", post(routes::bundles::send_bundle));
 
     if static_dir.exists() {

@@ -3,6 +3,7 @@
 pub mod config;
 pub mod coordinator;
 pub mod server;
+pub mod service_tracker;
 pub mod web;
 pub mod wizard;
 

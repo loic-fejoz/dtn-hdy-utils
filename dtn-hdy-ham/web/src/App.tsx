@@ -1,7 +1,7 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { Navbar } from './components/Navbar';
-import { ConfigView, StationConfig } from './components/ConfigView';
+import { ConfigView, StationConfig, ActiveService } from './components/ConfigView';
 import { SendBundleView } from './components/SendBundleView';
 
 export function App() {
@@ -15,6 +15,7 @@ export function App() {
   });
 
   const [config, setConfig] = useState<StationConfig | null>(null);
+  const [services, setServices] = useState<ActiveService[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,8 +48,48 @@ export function App() {
     }
   };
 
-  useEffect(() => {
+  // Fetch active services snapshot
+  const fetchServices = async () => {
+    try {
+      const res = await fetch('/api/v1/services');
+      if (res.ok) {
+        const data: ActiveService[] = await res.json();
+        setServices(data);
+      }
+    } catch {
+      // Retain existing services if network hiccup
+    }
+  };
+
+  const refreshAll = () => {
     fetchConfig();
+    fetchServices();
+  };
+
+  useEffect(() => {
+    refreshAll();
+
+    // Setup Server-Sent Events (SSE) listener for reactive updates
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/v1/events');
+      es.addEventListener('services_update', (e) => {
+        try {
+          const updated: ActiveService[] = JSON.parse(e.data);
+          setServices(updated);
+        } catch (err) {
+          console.error('Failed to parse services_update event', err);
+        }
+      });
+    } catch (err) {
+      console.warn('Failed to initialize EventSource SSE connection', err);
+    }
+
+    return () => {
+      if (es) {
+        es.close();
+      }
+    };
   }, []);
 
   return (
@@ -66,9 +107,10 @@ export function App() {
         {activeTab === 'config' ? (
           <ConfigView
             config={config}
+            services={services}
             loading={loading}
             error={error}
-            onRefresh={fetchConfig}
+            onRefresh={refreshAll}
           />
         ) : (
           <SendBundleView

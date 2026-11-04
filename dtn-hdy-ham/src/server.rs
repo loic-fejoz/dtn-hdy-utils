@@ -27,6 +27,7 @@ use std::num::NonZeroU32;
 pub struct HamServer {
     config: HamConfig,
     bpa: Arc<Bpa>,
+    service_tracker: crate::service_tracker::ServiceTracker,
     grpc_config: Option<hardy_proto::server::Config>,
     tcp_peers: Vec<(Arc<hardy_tcpclv4::Tcpclv4>, Vec<SocketAddr>)>,
     coordinators: Vec<ContactCoordinator>,
@@ -313,9 +314,12 @@ impl HamServer {
             None
         };
 
+        let service_tracker = crate::service_tracker::ServiceTracker::new(bpa.clone());
+
         Ok(Self {
             config,
             bpa,
+            service_tracker,
             grpc_config,
             tcp_peers,
             coordinators,
@@ -328,6 +332,22 @@ impl HamServer {
     pub async fn run(mut self) -> anyhow::Result<()> {
         info!("Starting Hamradio BPA server");
         self.bpa.start(true).await;
+
+        // Register permanent built-in Echo service
+        let echo_service = Arc::new(hardy_echo_service::EchoService::new());
+        let echo_service_id = hardy_bpv7::eid::Service::Dtn("echo".into());
+        match self
+            .service_tracker
+            .register_service_with_type(echo_service_id, echo_service, "Built-in Echo")
+            .await
+        {
+            Ok(eid) => {
+                info!("Registered permanent built-in Echo service at EID: {}", eid);
+            }
+            Err(e) => {
+                warn!("Failed to register built-in Echo service: {}", e);
+            }
+        }
 
         let coordinators = std::mem::take(&mut self.coordinators);
         for coordinator in coordinators {
@@ -371,7 +391,7 @@ impl HamServer {
         }
 
         if let Some(ref grpc_config) = self.grpc_config {
-            let server = GrpcServer::new(grpc_config, self.bpa.clone())
+            let server = GrpcServer::new(grpc_config, Arc::new(self.service_tracker.clone()))
                 .map_err(|e| anyhow::anyhow!("Failed to create gRPC server: {e}"))?;
             let cancel = self.tasks.cancel_token().clone();
             hardy_async::spawn!(self.tasks, "grpc_server", async move {
@@ -389,6 +409,7 @@ impl HamServer {
             let state = AppState {
                 config: Arc::new(self.config.clone()),
                 injector: self.web_injector.clone().expect("web_injector initialized"),
+                service_tracker: self.service_tracker.clone(),
             };
             let cancel = self.tasks.cancel_token().clone();
             let addr = web_config.address;
@@ -433,5 +454,11 @@ impl HamServer {
     #[must_use]
     pub fn web_injector(&self) -> Option<WebBundleInjector> {
         self.web_injector.clone()
+    }
+
+    /// Accessor for the active service tracker.
+    #[must_use]
+    pub fn service_tracker(&self) -> crate::service_tracker::ServiceTracker {
+        self.service_tracker.clone()
     }
 }

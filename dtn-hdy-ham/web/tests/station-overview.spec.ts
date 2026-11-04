@@ -54,6 +54,21 @@ test.describe('Station Overview & Identity', () => {
       });
     });
 
+    // Mock active services endpoint
+    await page.route('/api/v1/services', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            eid: 'dtn://f4jxq/echo',
+            type: 'Built-in Echo',
+            registered_at: '2026-11-04T14:00:00+01:00',
+          },
+        ]),
+      });
+    });
+
     await page.goto('/');
   });
 
@@ -88,6 +103,14 @@ test.describe('Station Overview & Identity', () => {
     // Check routes are listed
     await expect(page.getByText('dtn://f4jxq/*', { exact: true })).toBeVisible();
     await expect(page.getByText('dtn://*', { exact: true })).toBeVisible();
+  });
+
+  test('renders active DTN services with permanent echo service', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Active DTN Services' })).toBeVisible();
+    await expect(page.getByText('1 active')).toBeVisible();
+    await expect(page.getByText('dtn://f4jxq/echo')).toBeVisible();
+    await expect(page.getByText('Built-in Echo')).toBeVisible();
+    await expect(page.getByText('2026-11-04T14:00:00+01:00')).toBeVisible();
   });
 
   test('toggles raw JSON configuration viewer', async ({ page }) => {

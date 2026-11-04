@@ -13,4 +13,5 @@ This directory contains records of the major architectural and design decisions 
 7. [ADR 7: BPSec Security Integration and Service API Migration](0007-bpsec-security-integration.md)
 8. [ADR 8: Mercury Connected CLA and Shared Contact Coordinator](0008-mercury-connected-cla-and-contact-coordinator.md)
 9. [ADR 9: Axum Web Server and Preact UI for `dtn-hdy-ham`](0009-axum-web-server-and-preact-ui.md)
+10. [ADR 10: Active DTN Services Tracking and Real-Time SSE Dashboard for `dtn-hdy-ham`](0010-active-services-tracking-and-sse.md)
 

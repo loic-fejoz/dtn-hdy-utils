@@ -1005,9 +1005,11 @@ dependencies = [
  "clap",
  "config",
  "directories 5.0.1",
+ "futures-util",
  "hardy-async",
  "hardy-bpa",
  "hardy-bpv7",
+ "hardy-echo-service",
  "hardy-eid-patterns",
  "hardy-hqfbp-cla",
  "hardy-localdisk-storage",
@@ -1018,12 +1020,14 @@ dependencies = [
  "hardy-sqlite-storage",
  "hardy-tcpclv4",
  "humantime",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "time",
  "tokio",
+ "tokio-stream",
  "tower",
  "tower-http",
  "tracing",
@@ -1536,6 +1540,17 @@ dependencies = [
  "num-traits",
  "smallvec",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "hardy-echo-service"
+version = "0.2.0"
+dependencies = [
+ "hardy-async",
+ "hardy-bpa",
+ "hardy-bpv7",
+ "time",
+ "tracing",
 ]
 
 [[package]]
@@ -2640,6 +2655,15 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "num_threads"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -4034,7 +4058,9 @@ checksum = "711a53c2d47bbd818258c498c8dbfe186a2526c631495cfe7e078567f86b8469"
 dependencies = [
  "deranged",
  "js-sys",
+ "libc",
  "num-conv",
+ "num_threads",
  "powerfmt",
  "serde_core",
  "time-core",

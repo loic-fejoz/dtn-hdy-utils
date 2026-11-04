@@ -195,9 +195,11 @@ async fn test_ham_web_api_routes() {
 
     // Use router with AppState connected to the real server injector
     let injector = server.web_injector().expect("injector configured");
+    let service_tracker = server.service_tracker();
     let state = AppState {
         config: Arc::new(config),
         injector,
+        service_tracker: service_tracker.clone(),
     };
     let app = create_router(state);
 
@@ -262,6 +264,56 @@ async fn test_ham_web_api_routes() {
         .unwrap();
 
     assert_eq!(bad_req.status(), StatusCode::BAD_REQUEST);
+
+    // 4. Test GET /api/v1/services before and after registration
+    let svc_req = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/services")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(svc_req.status(), StatusCode::OK);
+    let svc_bytes = axum::body::to_bytes(svc_req.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let svcs: Vec<serde_json::Value> = serde_json::from_slice(&svc_bytes).unwrap();
+    assert_eq!(svcs.len(), 0);
+
+    // Register a service via service_tracker
+    let echo = std::sync::Arc::new(hardy_echo_service::EchoService::new());
+    let service_id = hardy_bpv7::eid::Service::Dtn("echo".into());
+    let reg_eid = service_tracker
+        .register_service_with_type(service_id, echo, "Built-in Echo")
+        .await
+        .expect("echo should register");
+
+    assert_eq!(reg_eid.to_string(), "dtn://stata/echo");
+
+    let svc_req2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/services")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(svc_req2.status(), StatusCode::OK);
+    let svc_bytes2 = axum::body::to_bytes(svc_req2.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let svcs2: Vec<serde_json::Value> = serde_json::from_slice(&svc_bytes2).unwrap();
+    assert_eq!(svcs2.len(), 1);
+    assert_eq!(svcs2[0]["eid"], "dtn://stata/echo");
+    assert_eq!(svcs2[0]["type"], "Built-in Echo");
+    assert!(svcs2[0]["registered_at"].as_str().is_some());
 
     server.shutdown().await;
 }

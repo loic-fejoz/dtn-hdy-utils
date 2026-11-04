@@ -15,6 +15,7 @@ instrument = ["hardy-async/instrument", "hardy-bpa/instrument", "tracing/attribu
 hardy-async = { version = "0.2", path = "../../hardy/async", features = ["watcher"] }
 hardy-bpa = { version = "0.2", path = "../../hardy/bpa", default-features = false, features = ["serde", "rfc9173", "tokio"] }
 hardy-bpv7 = { version = "0.6", path = "../../hardy/bpv7", features = ["serde"] }
+hardy-echo-service = { version = "0.2", path = "../../hardy/echo-service" }
 hardy-eid-patterns = { version = "0.4", path = "../../hardy/eid-patterns", features = ["serde", "dtn-pat-item"] }
 hardy-proto = { version = "0.2", path = "../../hardy/proto", features = ["serde"] }
 hardy-sqlite-storage = { version = "0.6", path = "../../hardy/sqlite-storage" }
@@ -23,7 +24,7 @@ hardy-tcpclv4 = { version = "0.4", path = "../../hardy/tcpclv4", features = ["se
 hardy-ltp-cla = { version = "0.1", path = "../ltp-cla", features = ["serde"] }
 hardy-hqfbp-cla = { version = "0.1", path = "../hqfbp-cla", features = ["serde", "serial"] }
 hardy-mercury-cla = { version = "0.1", path = "../mercury-cla", features = ["serde"] }
-time = { version = "0.3", features = ["parsing", "formatting"] }
+time = { version = "0.3", features = ["parsing", "formatting", "local-offset"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "net"] }
 config = { version = "0.15", features = ["yaml", "toml", "json"] }
 humantime = "2"
@@ -36,6 +37,8 @@ anyhow = "1"
 thiserror = "2"
 directories = "5"
 bytes = "1"
+futures-util = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
 axum = { version = "0.8", features = ["multipart"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 
@@ -43,3 +46,4 @@ tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 tempfile = "3"
 hardy-ltp = { path = "../ltp" }
 tower = { version = "0.5", features = ["util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
