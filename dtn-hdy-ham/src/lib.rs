@@ -4,6 +4,8 @@ pub mod config;
 pub mod coordinator;
 pub mod server;
 pub mod web;
+pub mod wizard;
 
 pub use config::HamConfig;
 pub use server::HamServer;
+pub use wizard::{run_interactive_wizard, run_wizard};

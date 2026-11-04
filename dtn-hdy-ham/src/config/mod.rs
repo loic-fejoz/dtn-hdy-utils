@@ -65,11 +65,46 @@ impl Default for HamConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct StorageConfig {
-    /// Path to SQLite database file. Defaults to `~/.local/share/hardy-ham/bundles.db`.
+    /// Directory for pending bundle payloads and SQLite database. Defaults to `~/.local/share/dtn-hdy-ham`.
+    pub data_dir: Option<PathBuf>,
+
+    /// Path to SQLite database file. Kept for backwards compatibility.
     pub sqlite_path: Option<PathBuf>,
 
     /// Run with in-memory volatile storage (useful for testing and ephemeral nodes).
     pub in_memory: bool,
+}
+
+impl StorageConfig {
+    /// Returns the effective base directory for storage.
+    pub fn effective_data_dir(&self) -> PathBuf {
+        if let Some(ref dir) = self.data_dir {
+            dir.clone()
+        } else if let Some(ref db) = self.sqlite_path {
+            db.parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+        } else if let Some(base_dirs) = directories::BaseDirs::new() {
+            base_dirs.data_local_dir().join("dtn-hdy-ham")
+        } else {
+            PathBuf::from("./data")
+        }
+    }
+
+    /// Returns the effective SQLite database file path.
+    pub fn effective_db_path(&self) -> PathBuf {
+        if let Some(ref db) = self.sqlite_path {
+            db.clone()
+        } else {
+            self.effective_data_dir().join("bundles.db")
+        }
+    }
+
+    /// Returns the effective directory for storing bundle payloads.
+    pub fn effective_payload_dir(&self) -> PathBuf {
+        self.effective_data_dir().join("payloads")
+    }
 }
 
 /// gRPC application interface settings.
@@ -150,6 +185,19 @@ pub struct RouteConfig {
 }
 
 impl HamConfig {
+    /// Checks if a configuration file exists at explicit path or in standard locations.
+    pub fn find_config(path: Option<&Path>) -> Option<PathBuf> {
+        if let Some(p) = path {
+            if p.exists() {
+                Some(p.to_path_buf())
+            } else {
+                None
+            }
+        } else {
+            Self::find_default_config()
+        }
+    }
+
     /// Loads configuration from an explicit file path or searches default standard locations.
     pub fn load(path: Option<&Path>) -> anyhow::Result<Self> {
         let candidate_path = if let Some(p) = path {
@@ -183,6 +231,12 @@ impl HamConfig {
     /// Normalizes configuration defaults, such as deriving node_id from callsign
     /// and propagating root callsign to CLAs.
     pub fn normalize(&mut self) {
+        if let Some(ref mut d) = self.storage.data_dir {
+            *d = crate::wizard::expand_tilde(d);
+        }
+        if let Some(ref mut p) = self.storage.sqlite_path {
+            *p = crate::wizard::expand_tilde(p);
+        }
         if let Some(ref cs) = self.callsign {
             if self.node_id == default_node_id() {
                 self.node_id = format!("dtn://{}/", cs.to_lowercase());

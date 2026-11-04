@@ -20,7 +20,8 @@ pub async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
         "admin_endpoints": config.admin_endpoints,
         "storage": {
             "in_memory": config.storage.in_memory,
-            "sqlite_path": config.storage.sqlite_path,
+            "data_dir": config.storage.data_dir,
+            "sqlite_path": config.storage.effective_db_path(),
         },
         "grpc": {
             "enabled": config.grpc.enabled,

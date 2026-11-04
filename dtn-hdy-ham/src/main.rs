@@ -34,15 +34,21 @@ struct Cli {
 enum Commands {
     /// Print an annotated example configuration file
     GenerateConfig,
+    /// Run the interactive configuration wizard
+    Init {
+        /// Optional path where to save the configuration file
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 const EXAMPLE_CONFIG: &str = r#"# dtn-hdy-ham: Hamradio DTN BPv7 Node Configuration
 # EID format can be DTN scheme (e.g. dtn://CALLSIGN.ampr.org/) or IPN scheme (e.g. ipn:NODE.0)
 node-id: "dtn://n0call.ampr.org/"
 
-# Storage settings (embedded SQLite database)
+# Storage settings (bundle storage directory & embedded SQLite database)
 storage:
-  sqlite-path: "~/.local/share/hardy-ham/bundles.db"
+  data-dir: "~/.local/share/dtn-hdy-ham"
   in-memory: false
 
 # Local gRPC endpoint for CLI tools (dtnsend, dtnprint, dtnping, etc.)
@@ -98,7 +104,16 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut config = HamConfig::load(cli.config.as_deref())?;
+    if let Some(Commands::Init { output }) = cli.command {
+        dtn_hdy_ham::run_interactive_wizard(output.or(cli.config))?;
+        return Ok(());
+    }
+
+    let mut config = if let Some(config_file) = HamConfig::find_config(cli.config.as_deref()) {
+        HamConfig::load(Some(&config_file))?
+    } else {
+        dtn_hdy_ham::run_interactive_wizard(cli.config.clone())?
+    };
 
     if let Some(nid) = cli.node_id {
         config.node_id = nid;

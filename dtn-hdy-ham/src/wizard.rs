@@ -1,0 +1,463 @@
+//! Interactive configuration wizard for first-time launch.
+
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, anyhow};
+
+use crate::HamConfig;
+
+/// Expands leading `~` to the user's home directory.
+pub fn expand_tilde(path: &Path) -> PathBuf {
+    if let Ok(stripped) = path.strip_prefix("~") {
+        if let Some(base) = directories::BaseDirs::new() {
+            return base.home_dir().join(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Contracts `$HOME` into `~` for concise display in prompts.
+pub fn contract_tilde(path: &Path) -> String {
+    if let Some(base) = directories::BaseDirs::new() {
+        let home = base.home_dir();
+        if let Ok(stripped) = path.strip_prefix(home) {
+            return format!("~/{}", stripped.display());
+        }
+    }
+    path.display().to_string()
+}
+
+/// Returns the standard default path for the configuration file.
+pub fn default_config_save_path() -> PathBuf {
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        base_dirs
+            .config_dir()
+            .join("dtn-hdy-ham")
+            .join("config.yaml")
+    } else {
+        PathBuf::from("config.yaml")
+    }
+}
+
+/// Returns the standard default storage directory for bundles and metadata.
+pub fn default_storage_dir() -> PathBuf {
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        base_dirs.data_local_dir().join("dtn-hdy-ham")
+    } else {
+        PathBuf::from("./data")
+    }
+}
+
+/// Finds the preferred TCP port, or the next available open port if preferred is already in use.
+pub fn find_available_port(preferred: u16, bind_ip: &str) -> u16 {
+    if std::net::TcpListener::bind(format!("{bind_ip}:{preferred}")).is_ok() {
+        return preferred;
+    }
+    for offset in 1..25 {
+        let candidate = preferred + offset;
+        if std::net::TcpListener::bind(format!("{bind_ip}:{candidate}")).is_ok() {
+            return candidate;
+        }
+    }
+    if let Ok(listener) = std::net::TcpListener::bind(format!("{bind_ip}:0")) {
+        if let Ok(addr) = listener.local_addr() {
+            return addr.port();
+        }
+    }
+    preferred
+}
+
+/// Parses a web listen address from user input.
+/// Accepts:
+/// - Port only: `"8088"` -> `"127.0.0.1:8088"`
+/// - IP and port: `"0.0.0.0:8080"` or `"[::]:8080"` -> `"0.0.0.0:8080"` / `"[::]:8080"`
+/// - IP only: `"0.0.0.0"` or `"192.168.1.1"` -> `"0.0.0.0:8088"` / `"192.168.1.1:8088"`
+/// - Empty input -> default `"127.0.0.1:8088"`
+pub fn parse_web_address(input: &str, default_addr: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return default_addr.to_string();
+    }
+    if trimmed.parse::<std::net::SocketAddr>().is_ok() {
+        return trimmed.to_string();
+    }
+    if let Ok(port) = trimmed.parse::<u16>() {
+        return format!("127.0.0.1:{port}");
+    }
+    if let Ok(ip) = trimmed.parse::<std::net::IpAddr>() {
+        let default_port = default_addr.rsplit(':').next().unwrap_or("8088");
+        return match ip {
+            std::net::IpAddr::V4(ipv4) => format!("{ipv4}:{default_port}"),
+            std::net::IpAddr::V6(ipv6) => format!("[{ipv6}]:{default_port}"),
+        };
+    }
+    default_addr.to_string()
+}
+
+fn prompt_yes_no<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    prompt: &str,
+    default_yes: bool,
+) -> Result<bool> {
+    loop {
+        write!(writer, "{prompt}")?;
+        writer.flush()?;
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            return Ok(default_yes);
+        }
+        let trimmed = line.trim().to_lowercase();
+        if trimmed.is_empty() {
+            return Ok(default_yes);
+        }
+        match trimmed.as_str() {
+            "y" | "yes" | "o" | "oui" => return Ok(true),
+            "n" | "no" | "non" => return Ok(false),
+            _ => {
+                writeln!(
+                    writer,
+                    "   Invalid response. Please answer 'y' (yes) or 'n' (no)."
+                )?;
+            }
+        }
+    }
+}
+
+/// Runs the interactive configuration wizard through any `BufRead` and `Write`.
+pub fn run_wizard<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    suggested_save_path: Option<PathBuf>,
+) -> Result<HamConfig> {
+    writeln!(
+        writer,
+        "==================================================================="
+    )?;
+    writeln!(
+        writer,
+        "      Welcome to dtn-hdy-ham - First-time Configuration Wizard"
+    )?;
+    writeln!(
+        writer,
+        "==================================================================="
+    )?;
+    writeln!(writer, "No configuration file was found.")?;
+    writeln!(
+        writer,
+        "This wizard will quickly initialize your DTN BPv7 amateur radio station.\n"
+    )?;
+
+    // 1. Callsign
+    writeln!(writer, "1. Amateur Radio Callsign:")?;
+    let callsign = loop {
+        write!(writer, "   Enter your callsign (e.g. F4JXQ, N0CALL): ")?;
+        writer.flush()?;
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            return Err(anyhow!("Unexpected end of input on stdin (EOF)."));
+        }
+        let trimmed = line.trim().to_uppercase();
+        if trimmed.is_empty() {
+            writeln!(writer, "   Callsign cannot be empty.")?;
+            continue;
+        }
+        if !trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            writeln!(
+                writer,
+                "   Callsign contains invalid characters (use letters, numbers, or hyphens)."
+            )?;
+            continue;
+        }
+        break trimmed;
+    };
+
+    // 2. Connect to dtn://f4jxq/ via TCPCLv4
+    writeln!(writer, "\n2. TCPCLv4 Gateway Connection:")?;
+    let connect_f4jxq = prompt_yes_no(
+        reader,
+        writer,
+        "   Connect to gateway dtn://f4jxq/ via TCPCLv4? [Y/n] (Default: Yes): ",
+        true,
+    )?;
+
+    // 3. Storage directory location
+    let default_dir = default_storage_dir();
+    let default_dir_display = contract_tilde(&default_dir);
+
+    writeln!(writer, "\n3. Bundle Storage Directory:")?;
+    write!(
+        writer,
+        "   Directory for bundle queue and database [Default: {default_dir_display}]: "
+    )?;
+    writer.flush()?;
+    let mut dir_line = String::new();
+    let _ = reader.read_line(&mut dir_line)?;
+    let trimmed_dir = dir_line.trim();
+    let data_dir = if trimmed_dir.is_empty() {
+        default_dir
+    } else {
+        expand_tilde(Path::new(trimmed_dir))
+    };
+
+    // 4. Web server address / port / interface
+    writeln!(writer, "\n4. Web Interface (Dashboard & REST API):")?;
+    write!(
+        writer,
+        "   Listen address or port (e.g. 8088, 0.0.0.0:8080) [Default: 127.0.0.1:8088]: "
+    )?;
+    writer.flush()?;
+    let mut web_line = String::new();
+    let _ = reader.read_line(&mut web_line)?;
+    let web_address = parse_web_address(&web_line, "127.0.0.1:8088");
+
+    // 5. Config file save location
+    let default_save_path = suggested_save_path.unwrap_or_else(default_config_save_path);
+    let default_save_display = contract_tilde(&default_save_path);
+
+    writeln!(writer, "\n5. Configuration File Destination:")?;
+    write!(
+        writer,
+        "   Save configuration to [Default: {default_save_display}]: "
+    )?;
+    writer.flush()?;
+    let mut save_line = String::new();
+    let _ = reader.read_line(&mut save_line)?;
+    let trimmed_save = save_line.trim();
+    let save_path = if trimmed_save.is_empty() {
+        default_save_path
+    } else {
+        expand_tilde(Path::new(trimmed_save))
+    };
+
+    let node_id = format!("dtn://{}/", callsign.to_lowercase());
+    let tcpcl_listen_port = find_available_port(4556, "0.0.0.0");
+    let grpc_port = find_available_port(50051, "127.0.0.1");
+
+    let mut clas_yaml = String::new();
+    let mut routes_yaml = String::new();
+
+    if connect_f4jxq {
+        clas_yaml.push_str(&format!(
+            r#"clas:
+  - name: "tcpcl-f4jxq"
+    type: "tcpclv4"
+    address: "0.0.0.0:{tcpcl_listen_port}"
+    require-tls: false
+    peers:
+      - "44.27.131.233:4556""#
+        ));
+        routes_yaml.push_str(
+            r#"routes:
+  - pattern: "dtn://f4jxq-9/**"
+    cla: "tcpcl-f4jxq"
+    next-hop: "dtn://f4jxq/""#,
+        );
+    } else {
+        clas_yaml.push_str("clas: []");
+        routes_yaml.push_str("routes: []");
+    }
+
+    let config_content = format!(
+        r#"# dtn-hdy-ham configuration generated by wizard
+callsign: "{callsign}"
+node-id: "{node_id}"
+
+storage:
+  in-memory: false
+  data-dir: "{data_dir}"
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:{grpc_port}"
+
+web:
+  address: "{web_address}"
+
+{clas_yaml}
+
+{routes_yaml}
+"#,
+        callsign = callsign,
+        node_id = node_id,
+        data_dir = data_dir.display(),
+        grpc_port = grpc_port,
+        web_address = web_address,
+        clas_yaml = clas_yaml.trim(),
+        routes_yaml = routes_yaml.trim(),
+    );
+
+    if let Some(parent) = save_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+
+    std::fs::write(&save_path, &config_content)
+        .with_context(|| format!("Failed to write configuration file {}", save_path.display()))?;
+
+    writeln!(
+        writer,
+        "\n✓ Configuration successfully saved to: {}",
+        save_path.display()
+    )?;
+    writeln!(writer, "Starting DTN BPv7 node...\n")?;
+    writer.flush()?;
+
+    HamConfig::load(Some(&save_path))
+}
+
+/// Runs the interactive configuration wizard using standard input and output.
+pub fn run_interactive_wizard(suggested_save_path: Option<PathBuf>) -> Result<HamConfig> {
+    let mut stdin = std::io::BufReader::new(std::io::stdin());
+    let mut stdout = std::io::stdout();
+    run_wizard(&mut stdin, &mut stdout, suggested_save_path).map_err(|e| {
+        anyhow!(
+            "{e}\n\nTo configure dtn-hdy-ham manually:\n  - Provide a configuration file with 'dtn-hdy-ham --config <FILE>'\n  - Or generate an example template with 'dtn-hdy-ham generate-config > config.yaml'"
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_expand_tilde() {
+        let p = Path::new("~/test/path.yaml");
+        let expanded = expand_tilde(p);
+        assert!(!expanded.starts_with("~"));
+        assert!(expanded.ends_with("test/path.yaml"));
+    }
+
+    #[test]
+    fn test_contract_tilde() {
+        if let Some(base) = directories::BaseDirs::new() {
+            let p = base.home_dir().join("test.yaml");
+            assert_eq!(contract_tilde(&p), "~/test.yaml");
+        }
+    }
+
+    #[test]
+    fn test_parse_web_address() {
+        assert_eq!(parse_web_address("", "127.0.0.1:8088"), "127.0.0.1:8088");
+        assert_eq!(
+            parse_web_address("8080", "127.0.0.1:8088"),
+            "127.0.0.1:8080"
+        );
+        assert_eq!(
+            parse_web_address("0.0.0.0:8080", "127.0.0.1:8088"),
+            "0.0.0.0:8080"
+        );
+        assert_eq!(
+            parse_web_address("[::]:9000", "127.0.0.1:8088"),
+            "[::]:9000"
+        );
+        assert_eq!(
+            parse_web_address("0.0.0.0", "127.0.0.1:8088"),
+            "0.0.0.0:8088"
+        );
+        assert_eq!(
+            parse_web_address("192.168.1.50", "127.0.0.1:8088"),
+            "192.168.1.50:8088"
+        );
+    }
+
+    #[test]
+    fn test_wizard_default_answers() {
+        let dir = tempdir().unwrap();
+        let save_target = dir.path().join("sub").join("my_config.yaml");
+
+        // Answers:
+        // 1. Callsign: F4XYZ
+        // 2. F4JXQ connect: <Enter> (default yes)
+        // 3. DB path: <Enter> (default)
+        // 4. Web listen: <Enter> (default 127.0.0.1:8088)
+        // 5. Config path: <Enter> (will use suggested save_target)
+        let input = "F4XYZ\n\n\n\n\n";
+        let mut reader = std::io::Cursor::new(input);
+        let mut output = Vec::new();
+
+        let cfg = run_wizard(&mut reader, &mut output, Some(save_target.clone())).unwrap();
+
+        assert_eq!(cfg.callsign, Some("F4XYZ".to_string()));
+        assert_eq!(cfg.node_id, "dtn://f4xyz/");
+        assert_eq!(cfg.clas.len(), 1);
+        assert_eq!(cfg.clas[0].name, "tcpcl-f4jxq");
+        assert_eq!(cfg.routes.len(), 1);
+        assert_eq!(cfg.routes[0].pattern, "dtn://f4jxq-9/**");
+        assert_eq!(cfg.web.unwrap().address, "127.0.0.1:8088".parse().unwrap());
+        assert!(save_target.exists());
+
+        let out_str = String::from_utf8(output).unwrap();
+        assert!(out_str.contains("Configuration successfully saved to"));
+    }
+
+    #[test]
+    fn test_wizard_custom_answers_all_interfaces() {
+        let dir = tempdir().unwrap();
+        let save_target = dir.path().join("config_all.yaml");
+        let custom_dir = dir.path().join("custom_storage");
+
+        // Answers:
+        // 1. Callsign: f4kmn (lowercase input)
+        // 2. F4JXQ connect: n
+        // 3. Storage directory: custom_dir
+        // 4. Web listen: 0.0.0.0:8080 (listen on all interfaces)
+        // 5. Config path: save_target
+        let input = format!(
+            "f4kmn\nn\n{}\n0.0.0.0:8080\n{}\n",
+            custom_dir.display(),
+            save_target.display()
+        );
+        let mut reader = std::io::Cursor::new(input);
+        let mut output = Vec::new();
+
+        let cfg = run_wizard(&mut reader, &mut output, None).unwrap();
+
+        assert_eq!(cfg.callsign, Some("F4KMN".to_string()));
+        assert_eq!(cfg.node_id, "dtn://f4kmn/");
+        assert_eq!(cfg.clas.len(), 0);
+        assert_eq!(cfg.routes.len(), 0);
+        assert_eq!(cfg.storage.data_dir, Some(custom_dir.clone()));
+        assert_eq!(cfg.storage.effective_data_dir(), custom_dir);
+        assert_eq!(
+            cfg.storage.effective_db_path(),
+            custom_dir.join("bundles.db")
+        );
+        assert_eq!(
+            cfg.storage.effective_payload_dir(),
+            custom_dir.join("payloads")
+        );
+        assert_eq!(cfg.web.unwrap().address, "0.0.0.0:8080".parse().unwrap());
+        assert!(save_target.exists());
+    }
+
+    #[test]
+    fn test_wizard_empty_callsign_retries() {
+        let dir = tempdir().unwrap();
+        let save_target = dir.path().join("retry_config.yaml");
+
+        // First two inputs empty, then valid callsign
+        let input = "\n   \nN0CALL\ny\n\n\n\n";
+        let mut reader = std::io::Cursor::new(input);
+        let mut output = Vec::new();
+
+        let cfg = run_wizard(&mut reader, &mut output, Some(save_target)).unwrap();
+        assert_eq!(cfg.callsign, Some("N0CALL".to_string()));
+    }
+
+    #[test]
+    fn test_wizard_eof_fails() {
+        let mut reader = std::io::Cursor::new("");
+        let mut output = Vec::new();
+        let res = run_wizard(&mut reader, &mut output, None);
+        assert!(res.is_err());
+    }
+}

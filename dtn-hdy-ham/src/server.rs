@@ -1,7 +1,6 @@
 //! Server initialization and lifecycle management for `dtn-hdy-ham`.
 
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -49,23 +48,11 @@ impl HamServer {
                     Arc::new(BundleMemStorage::new(None, None)),
                 )
             } else {
-                let db_path = config.storage.sqlite_path.clone().unwrap_or_else(|| {
-                    if let Some(base_dirs) = directories::BaseDirs::new() {
-                        base_dirs
-                            .data_local_dir()
-                            .join("hardy-ham")
-                            .join("bundles.db")
-                    } else {
-                        PathBuf::from("bundles.db")
-                    }
-                });
+                let data_dir = config.storage.effective_data_dir();
+                let db_path = config.storage.effective_db_path();
+                let bundle_dir = config.storage.effective_payload_dir();
 
-                let parent_dir = db_path
-                    .parent()
-                    .unwrap_or_else(|| std::path::Path::new("."));
-                let _ = std::fs::create_dir_all(parent_dir);
-
-                let bundle_dir = parent_dir.join("payloads");
+                let _ = std::fs::create_dir_all(&data_dir);
                 let _ = std::fs::create_dir_all(&bundle_dir);
 
                 info!("Using SQLite metadata storage at {}", db_path.display());
@@ -74,7 +61,7 @@ impl HamServer {
                     bundle_dir.display()
                 );
 
-                let db_dir = Some(parent_dir.to_path_buf());
+                let db_dir = Some(data_dir);
                 let db_name = db_path
                     .file_name()
                     .and_then(|n| n.to_str())
