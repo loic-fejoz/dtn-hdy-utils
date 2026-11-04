@@ -2,10 +2,11 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { Navbar } from './components/Navbar';
 import { ConfigView, StationConfig, ActiveService } from './components/ConfigView';
+import { BundlesView } from './components/BundlesView';
 import { SendBundleView } from './components/SendBundleView';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'config' | 'send'>('config');
+  const [activeTab, setActiveTab] = useState<'config' | 'bundles' | 'send'>('config');
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return (
       localStorage.getItem('theme') === 'dark' ||
@@ -18,6 +19,7 @@ export function App() {
   const [services, setServices] = useState<ActiveService[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bundlesKey, setBundlesKey] = useState(0);
 
   // Sync theme with <html> class
   useEffect(() => {
@@ -81,6 +83,9 @@ export function App() {
           console.error('Failed to parse services_update event', err);
         }
       });
+      es.addEventListener('bundles_update', () => {
+        setBundlesKey((k) => k + 1);
+      });
     } catch (err) {
       console.warn('Failed to initialize EventSource SSE connection', err);
     }
@@ -110,6 +115,11 @@ export function App() {
             services={services}
             loading={loading}
             error={error}
+            onRefresh={refreshAll}
+          />
+        ) : activeTab === 'bundles' ? (
+          <BundlesView
+            key={bundlesKey}
             onRefresh={refreshAll}
           />
         ) : (

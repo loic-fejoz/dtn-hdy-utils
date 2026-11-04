@@ -10,7 +10,7 @@ use hardy_bpa::{
     cla::{Cla, ClaInit},
     node_ids::NodeIds,
     routing::{RouteAction, StaticRoutingAgent},
-    storage::{BundleMemStorage, BundleStorage, MetadataMemStorage, MetadataStorage},
+    storage::{BundleStorage, MetadataStorage},
 };
 use hardy_localdisk_storage::LocalDiskStorage;
 use hardy_proto::server::GrpcServer;
@@ -32,22 +32,44 @@ pub struct HamServer {
     tcp_peers: Vec<(Arc<hardy_tcpclv4::Tcpclv4>, Vec<SocketAddr>)>,
     coordinators: Vec<ContactCoordinator>,
     web_injector: Option<WebBundleInjector>,
+    cla_manager: crate::cla_manager::ClaManager,
+    _ephemeral_dir: Option<tempfile::TempDir>,
     tasks: TaskPool,
 }
 
 impl HamServer {
     /// Constructs a new `HamServer` from the provided configuration.
-    pub async fn new(config: HamConfig) -> anyhow::Result<Self> {
+    pub async fn new(mut config: HamConfig) -> anyhow::Result<Self> {
         let tasks = TaskPool::new();
+        let cla_manager = crate::cla_manager::ClaManager::new();
+        let mut ephemeral_dir = None;
 
         // 1. Storage setup
         let (metadata_storage, bundle_storage): (Arc<dyn MetadataStorage>, Arc<dyn BundleStorage>) =
             if config.storage.in_memory {
-                info!("Using in-memory bundle and metadata storage");
-                (
-                    Arc::new(MetadataMemStorage::new(None)),
-                    Arc::new(BundleMemStorage::new(None, None)),
-                )
+                info!("Using ephemeral SQLite bundle and metadata storage for in-memory mode");
+                let temp = tempfile::Builder::new()
+                    .prefix("dtn-ham-mem-")
+                    .tempdir()
+                    .context("Failed to create temporary directory for in-memory storage")?;
+                let data_dir = temp.path().to_path_buf();
+                let db_path = data_dir.join("bundles.db");
+                let bundle_dir = data_dir.join("payloads");
+                let _ = std::fs::create_dir_all(&data_dir);
+                let _ = std::fs::create_dir_all(&bundle_dir);
+
+                config.storage.data_dir = Some(data_dir.clone());
+                config.storage.sqlite_path = Some(db_path);
+
+                let meta_store = Arc::new(SqliteStorage::new(
+                    Some(data_dir),
+                    Some("bundles.db".to_string()),
+                    true,
+                ));
+                let bundle_store =
+                    Arc::new(LocalDiskStorage::new(Some(bundle_dir), Some(false), true));
+                ephemeral_dir = Some(temp);
+                (meta_store, bundle_store)
             } else {
                 let data_dir = config.storage.effective_data_dir();
                 let db_path = config.storage.effective_db_path();
@@ -144,7 +166,12 @@ impl HamServer {
                         let mut resolved_peers = Vec::new();
                         for peer_str in peers {
                             match peer_str.to_socket_addrs() {
-                                Ok(addrs) => resolved_peers.extend(addrs),
+                                Ok(addrs) => {
+                                    for addr in addrs {
+                                        resolved_peers.push(addr);
+                                        cla_manager.register_tcp_peer(cla.clone(), addr).await;
+                                    }
+                                }
                                 Err(e) => {
                                     warn!(
                                         "Failed to resolve TCPCL peer address '{}': {}",
@@ -324,6 +351,8 @@ impl HamServer {
             tcp_peers,
             coordinators,
             web_injector,
+            cla_manager,
+            _ephemeral_dir: ephemeral_dir,
             tasks,
         })
     }
@@ -410,6 +439,7 @@ impl HamServer {
                 config: Arc::new(self.config.clone()),
                 injector: self.web_injector.clone().expect("web_injector initialized"),
                 service_tracker: self.service_tracker.clone(),
+                cla_manager: self.cla_manager.clone(),
             };
             let cancel = self.tasks.cancel_token().clone();
             let addr = web_config.address;
@@ -444,6 +474,12 @@ impl HamServer {
         self.bpa.shutdown().await;
     }
 
+    /// Accessor for the active configuration.
+    #[must_use]
+    pub fn config(&self) -> &HamConfig {
+        &self.config
+    }
+
     /// Accessor for the underlying `Bpa` instance.
     #[must_use]
     pub fn bpa(&self) -> Arc<Bpa> {
@@ -460,5 +496,11 @@ impl HamServer {
     #[must_use]
     pub fn service_tracker(&self) -> crate::service_tracker::ServiceTracker {
         self.service_tracker.clone()
+    }
+
+    /// Accessor for the CLA manager.
+    #[must_use]
+    pub fn cla_manager(&self) -> crate::cla_manager::ClaManager {
+        self.cla_manager.clone()
     }
 }

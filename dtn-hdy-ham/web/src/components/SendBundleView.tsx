@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 
 interface SendBundleViewProps {
   stationNodeId?: string;
@@ -16,12 +16,19 @@ interface SendResult {
 }
 
 export function SendBundleView({ stationNodeId, defaultDestination }: SendBundleViewProps) {
+  const [source, setSource] = useState(stationNodeId || '');
   const [destination, setDestination] = useState(defaultDestination || '');
-  const [source, setSource] = useState('');
   const [lifetime, setLifetime] = useState('3600');
   const [mode, setMode] = useState<'text' | 'file'>('text');
   const [textPayload, setTextPayload] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // Sync default station node ID into source field when config is loaded
+  useEffect(() => {
+    if (stationNodeId && !source) {
+      setSource(stationNodeId);
+    }
+  }, [stationNodeId]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,10 +138,27 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} class="p-6 space-y-6">
-          {/* Destination EID */}
+          {/* Sender / Source EID (From) */}
           <div>
             <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
-              Destination Endpoint ID (EID) <span class="text-emerald-500">*</span>
+              Sender / Source Endpoint ID (From)
+            </label>
+            <input
+              type="text"
+              value={source}
+              onInput={(e) => setSource((e.target as HTMLInputElement).value)}
+              placeholder={stationNodeId || 'dtn://station/ or ipn:1.0'}
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+            />
+            <p class="mt-1.5 text-xs text-slate-400">
+              The transmitting node or service endpoint. Automatically defaults to local station node: <span class="font-mono">{stationNodeId || 'station node'}</span>
+            </p>
+          </div>
+
+          {/* Destinator / Destination EID (To) */}
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+              Destinator / Destination Endpoint ID (To) <span class="text-emerald-500">*</span>
             </label>
             <input
               type="text"
@@ -149,39 +173,21 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
             </p>
           </div>
 
-          {/* Grid: Source EID & Lifetime */}
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
-                Source EID (Optional)
-              </label>
-              <input
-                type="text"
-                value={source}
-                onInput={(e) => setSource((e.target as HTMLInputElement).value)}
-                placeholder={stationNodeId || 'Default (Station EID)'}
-                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-              />
-              <p class="mt-1.5 text-xs text-slate-400">
-                Leave empty to use station default: <span class="font-mono">{stationNodeId}</span>
-              </p>
-            </div>
-
-            <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
-                Bundle Lifetime (Seconds)
-              </label>
-              <input
-                type="number"
-                min="10"
-                value={lifetime}
-                onInput={(e) => setLifetime((e.target as HTMLInputElement).value)}
-                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-              />
-              <p class="mt-1.5 text-xs text-slate-400">
-                Default 3600 seconds (1 hour store-and-forward retention).
-              </p>
-            </div>
+          {/* Bundle Lifetime */}
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+              Bundle Lifetime (Seconds)
+            </label>
+            <input
+              type="number"
+              min="10"
+              value={lifetime}
+              onInput={(e) => setLifetime((e.target as HTMLInputElement).value)}
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+            />
+            <p class="mt-1.5 text-xs text-slate-400">
+              Default 3600 seconds (1 hour store-and-forward retention).
+            </p>
           </div>
 
           {/* Payload Mode Switcher */}
@@ -336,8 +342,8 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
               </div>
 
               <div class="pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                <div>From: <span class="text-slate-800 dark:text-slate-200 font-semibold">{result.source}</span></div>
-                <div>To: <span class="text-slate-800 dark:text-slate-200 font-semibold">{result.destination}</span></div>
+                <div>From (Sender): <span class="text-slate-800 dark:text-slate-200 font-semibold">{result.source}</span></div>
+                <div>To (Destinator): <span class="text-slate-800 dark:text-slate-200 font-semibold">{result.destination}</span></div>
                 <div>Payload: <span class="text-slate-800 dark:text-slate-200">{result.payload_size} bytes</span></div>
                 <div>Lifetime: <span class="text-slate-800 dark:text-slate-200">{result.lifetime_secs}s</span></div>
               </div>

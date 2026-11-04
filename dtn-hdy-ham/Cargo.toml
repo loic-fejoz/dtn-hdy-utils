@@ -37,10 +37,12 @@ anyhow = "1"
 thiserror = "2"
 directories = "5"
 bytes = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
-axum = { version = "0.8", features = ["multipart"] }
+axum = { version = "0.8", features = ["multipart", "macros"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tempfile = "3"
 
 [dev-dependencies]
 tempfile = "3"

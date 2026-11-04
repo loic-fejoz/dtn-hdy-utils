@@ -34,10 +34,18 @@ impl WebBundleInjector {
         };
 
         if let Some(sink) = sink_opt {
-            let _ = sink
+            tracing::debug!(
+                "WebBundleInjector: dispatching {} bytes into BPA sink",
+                bundle_bytes.len()
+            );
+            let acceptance = sink
                 .dispatch(None, None, &mut bundle_bytes)
                 .await
                 .map_err(|e| anyhow::anyhow!("BPA dispatch failed: {e}"))?;
+            tracing::debug!(
+                "WebBundleInjector: BPA acceptance verdict: {:?}",
+                acceptance
+            );
             Ok(())
         } else {
             anyhow::bail!("Web bundle injector sink not attached")
@@ -70,6 +78,7 @@ impl Cla for WebBundleInjector {
         _total_len: u64,
         _stream: &mut (dyn Receiver<Segment> + '_),
     ) -> ClaResult<ForwardBundleResult> {
-        Ok(ForwardBundleResult::Sent)
+        // WebBundleInjector is exclusively an ingress sink, not an egress transport
+        Ok(ForwardBundleResult::NoNeighbour)
     }
 }

@@ -23,6 +23,7 @@ const mockStationConfig = {
       name: 'tcp-f4jxq',
       type: 'tcpclv4',
       connect: '192.168.1.100:4556',
+      peers: ['192.168.1.100:4556'],
     },
     {
       name: 'mercury-kiss',
@@ -103,6 +104,32 @@ test.describe('Station Overview & Identity', () => {
     // Check routes are listed
     await expect(page.getByText('dtn://f4jxq/*', { exact: true })).toBeVisible();
     await expect(page.getByText('dtn://*', { exact: true })).toBeVisible();
+  });
+
+  test('triggers manual peer connection with hand button', async ({ page }) => {
+    // Intercept POST /api/v1/clas/connect
+    await page.route('**/api/v1/clas/connect*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'connected',
+          peer: '192.168.1.100:4556',
+          message: 'Successfully connected to peer 192.168.1.100:4556',
+        }),
+      });
+    });
+
+    // Check hand button exists
+    const connectBtn = page.locator('button:has-text("Connect")');
+    await expect(connectBtn).toBeVisible();
+    await expect(connectBtn).toContainText('✋');
+
+    // Click connect
+    await connectBtn.click();
+
+    // Verify success banner appears
+    await expect(page.locator('text=Successfully connected to peer 192.168.1.100:4556')).toBeVisible();
   });
 
   test('renders active DTN services with permanent echo service', async ({ page }) => {

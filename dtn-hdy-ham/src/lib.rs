@@ -1,5 +1,7 @@
 //! `dtn-hdy-ham`: Hardy BPv7 Bundle Processing Agent for Amateur Radio Operators.
 
+pub mod bundle_inspector;
+pub mod cla_manager;
 pub mod config;
 pub mod coordinator;
 pub mod server;

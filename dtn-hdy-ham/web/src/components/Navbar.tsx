@@ -1,8 +1,8 @@
 import { h } from 'preact';
 
 interface NavbarProps {
-  activeTab: 'config' | 'send';
-  onTabChange: (tab: 'config' | 'send') => void;
+  activeTab: 'config' | 'bundles' | 'send';
+  onTabChange: (tab: 'config' | 'bundles' | 'send') => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   stationCallsign?: string;
@@ -58,6 +58,18 @@ export function Navbar({
           >
             <span>⚙️</span>
             <span>Configuration</span>
+          </button>
+
+          <button
+            onClick={() => onTabChange('bundles')}
+            class={`px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center space-x-2 ${
+              activeTab === 'bundles'
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+            }`}
+          >
+            <span>📦</span>
+            <span>Bundles</span>
           </button>
 
           <button

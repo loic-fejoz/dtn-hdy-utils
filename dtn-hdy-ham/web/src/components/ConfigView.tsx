@@ -47,6 +47,43 @@ interface ConfigViewProps {
 
 export function ConfigView({ config, services, loading, error, onRefresh }: ConfigViewProps) {
   const [showRawJson, setShowRawJson] = useState(false);
+  const [connectingPeer, setConnectingPeer] = useState<string | null>(null);
+  const [connectMessage, setConnectMessage] = useState<{
+    success: boolean;
+    text: string;
+  } | null>(null);
+
+  const handleForceConnect = async (peerStr: string) => {
+    setConnectingPeer(peerStr);
+    setConnectMessage(null);
+    try {
+      const res = await fetch('/api/v1/clas/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peer: peerStr }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setConnectMessage({
+          success: true,
+          text: `Successfully connected to peer ${peerStr}`,
+        });
+        setTimeout(() => setConnectMessage(null), 5000);
+      } else {
+        setConnectMessage({
+          success: false,
+          text: data.error || `Connection to ${peerStr} failed (HTTP ${res.status})`,
+        });
+      }
+    } catch (err: any) {
+      setConnectMessage({
+        success: false,
+        text: err.message || `Failed to connect to ${peerStr}`,
+      });
+    } finally {
+      setConnectingPeer(null);
+    }
+  };
 
   if (loading && !config) {
     return (
@@ -293,29 +330,69 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
                 {cla.peers && cla.peers.length > 0 && (
                   <div class="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 text-xs">
                     <span class="text-slate-400 font-medium">Configured Peers:</span>
+
+                    {connectMessage && (
+                      <div
+                        class={`mt-2 p-2.5 rounded-lg text-xs font-medium border flex items-center justify-between ${
+                          connectMessage.success
+                            ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                            : 'bg-red-50 dark:bg-red-950/60 border-red-300 dark:border-red-800 text-red-800 dark:text-red-300'
+                        }`}
+                      >
+                        <span>{connectMessage.success ? '✓' : '⚠️'} {connectMessage.text}</span>
+                        <button
+                          onClick={() => setConnectMessage(null)}
+                          class="text-xs hover:underline ml-2"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+
                     <div class="mt-1.5 space-y-2">
-                      {cla.peers.map((peer: any) => (
-                        <div class="bg-white dark:bg-slate-900/80 p-2 rounded-lg border border-slate-200 dark:border-slate-700/80">
-                          <div class="flex items-center justify-between font-mono font-semibold">
-                            <span class="text-slate-800 dark:text-slate-200">
-                              {peer.callsign || peer}
-                            </span>
-                            {peer['node-id'] && (
-                              <span class="text-emerald-600 dark:text-emerald-400 text-[11px]">
-                                {peer['node-id']}
-                              </span>
+                      {cla.peers.map((peer: any) => {
+                        const peerTarget =
+                          typeof peer === 'string'
+                            ? peer
+                            : peer.address || peer.callsign || peer['node-id'] || '';
+                        const isConnecting = connectingPeer === peerTarget;
+
+                        return (
+                          <div class="bg-white dark:bg-slate-900/80 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700/80">
+                            <div class="flex items-center justify-between font-mono font-semibold">
+                              <div class="flex items-center space-x-2">
+                                <span class="text-slate-800 dark:text-slate-200">
+                                  {peer.callsign || peer}
+                                </span>
+                                {peer['node-id'] && (
+                                  <span class="text-emerald-600 dark:text-emerald-400 text-[11px]">
+                                    {peer['node-id']}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Manual Connect Button */}
+                              <button
+                                onClick={() => handleForceConnect(peerTarget)}
+                                disabled={isConnecting}
+                                title={`Force connection to peer ${peerTarget}`}
+                                class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              >
+                                <span>{isConnecting ? '⏳' : '✋'}</span>
+                                <span>{isConnecting ? 'Connecting...' : 'Connect'}</span>
+                              </button>
+                            </div>
+                            {peer.schedule && (
+                              <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                <span>⏱️ Schedule:</span>
+                                <span class="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-300">
+                                  {peer.schedule.cron || peer.schedule.type} ({peer.schedule.duration || 'no duration'})
+                                </span>
+                              </div>
                             )}
                           </div>
-                          {peer.schedule && (
-                            <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                              <span>⏱️ Schedule:</span>
-                              <span class="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-300">
-                                {peer.schedule.cron || peer.schedule.type} ({peer.schedule.duration || 'no duration'})
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

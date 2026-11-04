@@ -196,10 +196,12 @@ async fn test_ham_web_api_routes() {
     // Use router with AppState connected to the real server injector
     let injector = server.web_injector().expect("injector configured");
     let service_tracker = server.service_tracker();
+    let cla_manager = server.cla_manager();
     let state = AppState {
         config: Arc::new(config),
         injector,
         service_tracker: service_tracker.clone(),
+        cla_manager,
     };
     let app = create_router(state);
 

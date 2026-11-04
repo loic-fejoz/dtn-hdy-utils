@@ -36,6 +36,8 @@ pub struct ServiceInfo {
 pub enum ServiceEvent {
     #[serde(rename = "services_update")]
     ServicesUpdate { services: Vec<ServiceInfo> },
+    #[serde(rename = "bundles_update")]
+    BundlesUpdate,
 }
 
 /// Generates an ISO 8601 timestamp with local timezone offset (or UTC fallback).
@@ -122,6 +124,11 @@ impl ServiceTracker {
     #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<ServiceEvent> {
         self.tracker.tx.subscribe()
+    }
+
+    /// Broadcasts a bundles changed notification over SSE.
+    pub fn broadcast_bundles_update(&self) {
+        let _ = self.tracker.tx.send(ServiceEvent::BundlesUpdate);
     }
 
     /// Helper to register a service with a custom type label.

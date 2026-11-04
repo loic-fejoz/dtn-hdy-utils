@@ -35,12 +35,13 @@ test.describe('Send Bundle View', () => {
   });
 
   test('navigates to send bundle tab and shows default station placeholders', async ({ page }) => {
+    const sourceInput = page.getByPlaceholder('dtn://f4jxq/');
+    await expect(sourceInput).toBeVisible();
+    await expect(sourceInput).toHaveValue('dtn://f4jxq/');
+
     const destInput = page.getByPlaceholder('dtn://statb/incoming or ipn:2.1');
     await expect(destInput).toBeVisible();
     await expect(destInput).toHaveValue('');
-
-    const sourceInput = page.getByPlaceholder('dtn://f4jxq/');
-    await expect(sourceInput).toBeVisible();
 
     const lifetimeInput = page.locator('input[type="number"]');
     await expect(lifetimeInput).toHaveValue('3600');
@@ -76,6 +77,7 @@ test.describe('Send Bundle View', () => {
 
     // Verify request payload was formatted correctly
     expect(interceptedRequestBody).toEqual({
+      source: 'dtn://f4jxq/',
       destination: 'dtn://f1xyz/bulletin',
       lifetime: 3600,
       payload: '73 de F4JXQ - CQ DTN test over VHF',
@@ -85,8 +87,8 @@ test.describe('Send Bundle View', () => {
     await expect(page.getByText('Bundle Successfully Dispatched')).toBeVisible();
     await expect(page.getByText('SENT')).toBeVisible();
     await expect(page.getByText('bundle://f4jxq/1730718000/0')).toBeVisible();
-    await expect(page.getByText('From: dtn://f4jxq/')).toBeVisible();
-    await expect(page.getByText('To: dtn://f1xyz/bulletin')).toBeVisible();
+    await expect(page.getByText('From (Sender): dtn://f4jxq/')).toBeVisible();
+    await expect(page.getByText('To (Destinator): dtn://f1xyz/bulletin')).toBeVisible();
   });
 
   test('copies bundle ID to clipboard on button click', async ({ page }) => {
@@ -165,7 +167,7 @@ test.describe('Send Bundle View', () => {
     expect(requestWasMultipart).toBe(true);
     await expect(page.getByText('Bundle Successfully Dispatched')).toBeVisible();
     await expect(page.getByText('bundle://f4jxq/1730718100/99')).toBeVisible();
-    await expect(page.getByText('To: dtn://f1xyz/files')).toBeVisible();
+    await expect(page.getByText('To (Destinator): dtn://f1xyz/files')).toBeVisible();
   });
 
   test('displays validation error if message payload is empty', async ({ page }) => {

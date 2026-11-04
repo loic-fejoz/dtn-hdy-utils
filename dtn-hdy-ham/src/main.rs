@@ -26,6 +26,14 @@ struct Cli {
     #[arg(long)]
     in_memory: bool,
 
+    /// Increase verbosity level (-v: debug, -vv: trace)
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    verbose: u8,
+
+    /// Suppress verbose logging (warnings and errors only)
+    #[arg(short = 'q', long = "quiet")]
+    quiet: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -91,13 +99,25 @@ routes:
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
-
     let cli = Cli::parse();
+
+    let env_filter = if std::env::var("RUST_LOG").is_ok() {
+        EnvFilter::from_default_env()
+    } else if cli.quiet {
+        EnvFilter::new("warn")
+    } else {
+        match cli.verbose {
+            0 => EnvFilter::new("info"),
+            1 => EnvFilter::new(
+                "info,dtn_hdy_ham=debug,hardy=debug,hardy_bpa=debug,hardy_tcpclv4=debug,hardy_ltp=debug,hardy_hqfbp_cla=debug,hardy_mercury_cla=debug",
+            ),
+            _ => EnvFilter::new(
+                "debug,dtn_hdy_ham=trace,hardy=trace,hardy_bpa=trace,hardy_tcpclv4=trace,hardy_ltp=trace,hardy_hqfbp_cla=trace,hardy_mercury_cla=trace",
+            ),
+        }
+    };
+
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     if let Some(Commands::GenerateConfig) = cli.command {
         print!("{EXAMPLE_CONFIG}");

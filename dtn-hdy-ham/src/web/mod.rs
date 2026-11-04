@@ -21,6 +21,7 @@ pub struct AppState {
     pub config: Arc<HamConfig>,
     pub injector: WebBundleInjector,
     pub service_tracker: crate::service_tracker::ServiceTracker,
+    pub cla_manager: crate::cla_manager::ClaManager,
 }
 
 /// Builds the Axum router with API endpoints and SPA static asset fallback.
@@ -54,7 +55,17 @@ pub fn create_router(state: AppState) -> Router {
         .route("/config", get(routes::config::get_config))
         .route("/services", get(routes::services::get_services))
         .route("/events", get(routes::services::sse_events))
-        .route("/bundles", post(routes::bundles::send_bundle));
+        .route(
+            "/bundles",
+            get(routes::bundles::list_bundles)
+                .post(routes::bundles::send_bundle)
+                .delete(routes::bundles::delete_bundle_handler),
+        )
+        .route(
+            "/bundles/payload",
+            get(routes::bundles::get_bundle_payload_handler),
+        )
+        .route("/clas/connect", post(routes::clas::connect_peer_handler));
 
     if static_dir.exists() {
         info!(

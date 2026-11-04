@@ -90,12 +90,29 @@ async fn build_and_inject_bundle(
     let bundle_id = bundle.primary.id.to_key();
     let bundle_bytes = Bytes::from(binbundle.into_vec());
 
+    tracing::info!(
+        "Dispatching bundle {} -> {} (id: {}, size: {} bytes, lifetime: {}s)",
+        source_eid,
+        destination_eid,
+        bundle_id,
+        payload_len,
+        lifetime.as_secs()
+    );
+
     state.injector.inject(bundle_bytes).await.map_err(|e| {
+        tracing::error!("Failed to inject bundle {}: {e}", bundle_id);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to dispatch bundle to BPA: {e}"),
         )
     })?;
+
+    tracing::info!("Bundle {} injected successfully into BPA", bundle_id);
+
+    // Allow BPA async dispatch loop to write the bundle to storage before notifying clients
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    state.service_tracker.broadcast_bundles_update();
 
     Ok(json!({
         "status": "sent",
@@ -191,5 +208,129 @@ pub async fn send_bundle(State(state): State<AppState>, request: Request) -> imp
             Ok(res) => (StatusCode::CREATED, Json(res)).into_response(),
             Err((code, err)) => (code, Json(json!({ "error": err }))).into_response(),
         }
+    }
+}
+
+use axum::extract::Query;
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::response::Response;
+
+/// Query parameters for bundle operations.
+#[derive(Debug, Deserialize)]
+pub struct BundleQuery {
+    pub id: Option<String>,
+}
+
+/// Handler for `GET /api/v1/bundles` - Lists stored bundles, or a single bundle detail if ?id=... is given.
+pub async fn list_bundles(
+    State(state): State<AppState>,
+    Query(query): Query<BundleQuery>,
+) -> Response {
+    let db_path = state.config.storage.effective_db_path();
+    let payload_dir = state.config.storage.effective_payload_dir();
+
+    if let Some(id) = query.id {
+        match crate::bundle_inspector::get_bundle_detail(&db_path, &payload_dir, &id).await {
+            Ok(Some(detail)) => Json(json!(detail)).into_response(),
+            Ok(None) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Bundle not found" })),
+            )
+                .into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    } else {
+        match crate::bundle_inspector::list_bundles_from_db(&db_path) {
+            Ok(bundles) => Json(json!(bundles)).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+                .into_response(),
+        }
+    }
+}
+
+/// Handler for `GET /api/v1/bundles/payload` - Downloads or streams the raw bundle payload.
+pub async fn get_bundle_payload_handler(
+    State(state): State<AppState>,
+    Query(query): Query<BundleQuery>,
+) -> Response {
+    let Some(id) = query.id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Missing 'id' query parameter" })),
+        )
+            .into_response();
+    };
+
+    let db_path = state.config.storage.effective_db_path();
+    let payload_dir = state.config.storage.effective_payload_dir();
+
+    match crate::bundle_inspector::get_bundle_payload(&db_path, &payload_dir, &id).await {
+        Ok(Some((bytes, mime))) => (
+            StatusCode::OK,
+            [
+                (CONTENT_TYPE, mime),
+                (
+                    CONTENT_DISPOSITION,
+                    "inline; filename=\"bundle_payload.bin\"",
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Bundle or payload not found" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// Handler for `DELETE /api/v1/bundles` - Deletes a bundle from storage.
+pub async fn delete_bundle_handler(
+    State(state): State<AppState>,
+    Query(query): Query<BundleQuery>,
+) -> Response {
+    let Some(id) = query.id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Missing 'id' query parameter" })),
+        )
+            .into_response();
+    };
+
+    let db_path = state.config.storage.effective_db_path();
+    let payload_dir = state.config.storage.effective_payload_dir();
+
+    match crate::bundle_inspector::delete_bundle_from_storage(&db_path, &payload_dir, &id).await {
+        Ok(true) => {
+            state.service_tracker.broadcast_bundles_update();
+            (
+                StatusCode::OK,
+                Json(json!({ "status": "deleted", "bundle_id": id })),
+            )
+                .into_response()
+        }
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Bundle not found" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
     }
 }

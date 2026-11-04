@@ -33,6 +33,9 @@ pub async fn sse_events(
                 let data = serde_json::to_string(&services).unwrap_or_default();
                 Some(Ok(Event::default().event("services_update").data(data)))
             }
+            Ok(ServiceEvent::BundlesUpdate) => {
+                Some(Ok(Event::default().event("bundles_update").data("{}")))
+            }
             Err(_) => None,
         }
     });
