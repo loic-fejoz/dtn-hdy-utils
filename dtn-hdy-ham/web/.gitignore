@@ -2,3 +2,5 @@ node_modules/
 .pnpm-store/
 .state/
 .data/
+test-results/
+playwright-report/
