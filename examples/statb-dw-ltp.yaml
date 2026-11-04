@@ -1,0 +1,28 @@
+# Station B (STATB) using LTP over Direwolf KISS TCP (Station B KISS port 8101)
+node-id: "dtn://statb.ampr.org/"
+callsign: "STATB"
+
+storage:
+  data-dir: "/tmp/dtn-statb"
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3051"
+
+web:
+  address: "127.0.0.1:8082"
+
+clas:
+  - name: "ltp-direwolf-b"
+    type: "ltp"
+    engine-id: 2
+    rtt: "2s"
+    ack-margin: "1s"
+    transport:
+      type: "kiss-tcp"
+      server-addr: "127.0.0.1:8101"
+      port: 0
+      min-frame-len: 15
+    peers:
+      - engine-id: 1
+        node-id: "dtn://stata.ampr.org/"

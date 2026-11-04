@@ -389,6 +389,7 @@ async fn test_kiss_tcp_reconnection_and_backoff() {
             port: 0,
             reconnect_initial_delay: Duration::from_millis(50),
             reconnect_max_delay: Duration::from_millis(200),
+            min_frame_len: 0,
         },
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
@@ -479,6 +480,7 @@ async fn test_s17_multi_station_kiss_tcp_peer_resolution() {
             port: 0,
             reconnect_initial_delay: Duration::from_millis(50),
             reconnect_max_delay: Duration::from_millis(200),
+            min_frame_len: 0,
         },
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(100),
@@ -578,6 +580,7 @@ async fn test_s18_driver_shutdown_notifies_pending_transfers() {
             port: 0,
             reconnect_initial_delay: Duration::from_millis(50),
             reconnect_max_delay: Duration::from_millis(200),
+            min_frame_len: 0,
         },
         max_segment_payload_len: 1024,
         rtt: Duration::from_secs(10), // Long RTT so it doesn't expire during test
@@ -983,6 +986,7 @@ async fn test_s41_kiss_tcp_extreme_stream_fragmentation() {
             port: 0,
             reconnect_initial_delay: Duration::from_millis(50),
             reconnect_max_delay: Duration::from_millis(200),
+            min_frame_len: 0,
         },
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
@@ -1105,6 +1109,7 @@ async fn test_s42_kiss_tcp_accumulator_overflow_and_recovery() {
             port: 0,
             reconnect_initial_delay: Duration::from_millis(50),
             reconnect_max_delay: Duration::from_millis(200),
+            min_frame_len: 0,
         },
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
@@ -1223,6 +1228,7 @@ async fn test_s43_kiss_tcp_non_data_commands_ignored() {
             port: 0,
             reconnect_initial_delay: Duration::from_millis(50),
             reconnect_max_delay: Duration::from_millis(200),
+            min_frame_len: 0,
         },
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
@@ -2228,4 +2234,62 @@ async fn test_dynamic_peer_timing_geo_and_cislunar() {
 
     cla_1.unregister().await;
     cla_2.unregister().await;
+}
+
+#[test]
+fn test_pad_segment_for_tnc_minimum_size() {
+    use hardy_ltp::segment::{Segment as LtpSegment, SegmentBody};
+    use hardy_ltp::types::{CancelReason, EngineId, SessionId};
+
+    // 1. Tiny ReportAck (6 bytes)
+    let ra = LtpSegment {
+        session: SessionId {
+            originator: EngineId(1),
+            number: 42,
+        },
+        header_ext: Vec::new(),
+        trailer_ext: Vec::new(),
+        body: SegmentBody::ReportAck { report_serial: 100 },
+    };
+    let ra_raw = ra.encode_to_vec();
+    assert!(ra_raw.len() < 15);
+
+    // 0. Zero minimum frame length (Mercury mode) -> no padding applied, exact length preserved
+    let unpadded_ra = hardy_ltp_cla::pad_segment_for_tnc(&ra_raw, 0);
+    assert_eq!(unpadded_ra.len(), ra_raw.len());
+
+    // 1. Tiny ReportAck (6 bytes) with Direwolf min_frame_len = 15
+    let padded_ra = hardy_ltp_cla::pad_segment_for_tnc(&ra_raw, 15);
+    assert!(padded_ra.len() >= 15);
+    let (parsed_ra, consumed_ra) = LtpSegment::parse(&padded_ra).unwrap();
+    assert_eq!(consumed_ra, padded_ra.len());
+    match parsed_ra.body {
+        SegmentBody::ReportAck { report_serial } => assert_eq!(report_serial, 100),
+        other => panic!("expected ReportAck, got {other:?}"),
+    }
+
+    // 2. Tiny CancelSender (5 bytes) with Direwolf min_frame_len = 15
+    let cs = LtpSegment {
+        session: SessionId {
+            originator: EngineId(1),
+            number: 42,
+        },
+        header_ext: Vec::new(),
+        trailer_ext: Vec::new(),
+        body: SegmentBody::CancelSender {
+            reason: CancelReason::UsrCncld,
+        },
+    };
+    let cs_raw = cs.encode_to_vec();
+    assert!(cs_raw.len() < 15);
+
+    let padded_cs = hardy_ltp_cla::pad_segment_for_tnc(&cs_raw, 15);
+    assert!(padded_cs.len() >= 15);
+    let (_parsed_cs, consumed_cs) = LtpSegment::parse(&padded_cs).unwrap();
+    assert_eq!(consumed_cs, padded_cs.len());
+
+    // 3. Large segment (already >= 15 bytes)
+    let large = vec![0x42u8; 50];
+    let padded_large = hardy_ltp_cla::pad_segment_for_tnc(&large, 15);
+    assert_eq!(padded_large.len(), 50);
 }

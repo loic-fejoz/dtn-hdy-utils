@@ -203,6 +203,28 @@ flowchart TD
 
 ---
 
+### Phase 8: Simplex Radio Medium Access Control & Collision Mitigation (TDMA / Half-Duplex MAC)
+> **Goal**: Prevent RF packet collisions and PTT contention on shared single-frequency simplex channels (e.g., FSK 9600 Direwolf, VHF/UHF packet radio, and terrestrial half-duplex transceivers).
+
+#### Context & Problem Statement:
+* LTP (RFC 5326) was historically designed for full-duplex deep space / satellite links (separate uplink and downlink frequencies).
+* On a simplex radio channel (shared single frequency in half-duplex alternat), transmitting locally blinds/desensitizes the receiver. Simultaneous transmissions of data segments, Checkpoints (CP), Report Segments (RS), and Report Acks (RA) will collide without medium access control (MAC).
+
+#### Deliverables:
+1. **TDMA Time-Slotting Coordinator for Simplex CLAs**:
+   * Synchronized time-division multiple access using system clock (NTP / GPS time).
+   * Even/odd second or configurable slot allocation (e.g., Station A transmits in slot $0 \le t < T$, Station B in slot $T \le t < 2T$).
+   * CLA outbound buffer holdoff: queue outgoing LTP frames in memory and transmit them in bursts exclusively during the station's assigned TX slot.
+2. **Half-Duplex Ping-Pong / Turnaround Guard State Machine**:
+   * Turn-based MAC for non-time-synchronized simplex links: sender transmits up to a Checkpoint, then explicitly releases PTT and enters listening state.
+   * Configurable turnaround delay margin (*PTT keyup/tail guard time*) before receiver replies with Report Segments.
+3. **KISS TNC CSMA Parameters Management**:
+   * Expose KISS parameters (`TXDELAY`, `PERSIST`, `SLOTTIME`, `TXTAIL`) in CLA YAML configuration to fine-tune Direwolf / hardware TNC p-persistent CSMA.
+4. **Unidirectional Simplex Profile (LTP Green Data / HQFBP)**:
+   * Optimized configuration profiles for strictly unidirectional simplex channels (e.g., telemetry broadcast, weather bulletins, emergency multicast) using LTP Lane 1 (Green Data) or HQFBP, guaranteeing zero return transmissions and zero collisions.
+
+---
+
 ## 5. Technical Requirements & Dependencies
 
 ### Backend (Rust / Axum)

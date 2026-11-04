@@ -9,10 +9,10 @@ use crate::HamConfig;
 
 /// Expands leading `~` to the user's home directory.
 pub fn expand_tilde(path: &Path) -> PathBuf {
-    if let Ok(stripped) = path.strip_prefix("~") {
-        if let Some(base) = directories::BaseDirs::new() {
-            return base.home_dir().join(stripped);
-        }
+    if let Ok(stripped) = path.strip_prefix("~")
+        && let Some(base) = directories::BaseDirs::new()
+    {
+        return base.home_dir().join(stripped);
     }
     path.to_path_buf()
 }
@@ -60,10 +60,10 @@ pub fn find_available_port(preferred: u16, bind_ip: &str) -> u16 {
             return candidate;
         }
     }
-    if let Ok(listener) = std::net::TcpListener::bind(format!("{bind_ip}:0")) {
-        if let Ok(addr) = listener.local_addr() {
-            return addr.port();
-        }
+    if let Ok(listener) = std::net::TcpListener::bind(format!("{bind_ip}:0"))
+        && let Ok(addr) = listener.local_addr()
+    {
+        return addr.port();
     }
     preferred
 }

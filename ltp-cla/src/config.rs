@@ -106,6 +106,10 @@ pub enum TransportMode {
             serde(default = "default_reconnect_max", with = "humantime_duration")
         )]
         reconnect_max_delay: Duration,
+        /// Minimum frame length in bytes required by the underlying TNC (e.g. 15 for Direwolf).
+        /// Defaults to 0 (no padding, preserving minimal frame size for modems like Mercury).
+        #[cfg_attr(feature = "serde", serde(default))]
+        min_frame_len: usize,
     },
 }
 
@@ -119,7 +123,21 @@ impl TransportMode {
             port,
             reconnect_initial_delay: default_reconnect_initial(),
             reconnect_max_delay: default_reconnect_max(),
+            min_frame_len: 0,
         }
+    }
+
+    /// Sets the minimum frame length in bytes for TNC compatibility.
+    #[must_use]
+    pub fn with_min_frame_len(mut self, min_len: usize) -> Self {
+        if let Self::KissTcp {
+            min_frame_len: ref mut len,
+            ..
+        } = self
+        {
+            *len = min_len;
+        }
+        self
     }
 }
 

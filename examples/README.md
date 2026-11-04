@@ -323,5 +323,52 @@ This demonstrates the Axum web server and Preact single-page application embedde
 
 3. Open your browser at `http://127.0.0.1:8088/` to access the dashboard.
 
+## Two-Station Hamradio LTP over Direwolf G3RUH (`stata-dw-ltp.yaml` & `statb-dw-ltp.yaml`)
+
+This demonstrates bidirectional BPv7 bundle transfer over the Licklider Transmission Protocol (RFC 5326) using Direwolf software TNCs connected via PipeWire/PulseAudio crossed null-sinks in G3RUH 9600 baud packet radio mode:
+- **Direwolf Crossed Bridge**: `launch_dual_direwolf.sh` launches two Direwolf instances connected via PipeWire/PulseAudio null-sinks (`dw_a_tx` and `dw_b_tx` at 48000 Hz) using ALSA virtual PCM mapping. Both instances use `MODEM 9600` (G3RUH) and basic KISS TCP mode (Station A on port 8001, Station B on port 8101) with AX.25 and FX.25 disabled.
+- **Compatibility**: `hardy-ltp-cla` supports an optional `min-frame-len` setting on `kiss-tcp` (defaulting to 0 for modems like Mercury with no padding). When set to `min-frame-len: 15` for Direwolf, it automatically formats small LTP control segments (such as Report Acknowledgment and Cancel frames) using standard RFC 5326 trailer extensions to meet TNC minimum frame size constraints (15 octets).
+- `STATA` (`examples/stata-dw-ltp.yaml`): Node EID `dtn://stata.ampr.org/`, Web API `http://127.0.0.1:8081`, LTP Engine ID `1`, KISS TCP client connected to `127.0.0.1:8001`.
+- `STATB` (`examples/statb-dw-ltp.yaml`): Node EID `dtn://statb.ampr.org/`, Web API `http://127.0.0.1:8082`, LTP Engine ID `2`, KISS TCP client connected to `127.0.0.1:8101`.
+
+### Automated Bidirectional Test:
+
+Run the automated test script which sets up Direwolf, launches both BPAs, transmits bundles in both directions via the REST API, and verifies reception in the SQLite and disk stores:
+```bash
+./examples/test_bidirectional_direwolf.sh
+```
+
+### Manual Demonstration:
+
+1. Launch the dual Direwolf simulator:
+   ```bash
+   ./examples/launch_dual_direwolf.sh
+   ```
+
+2. Start STATB in another terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/statb-dw-ltp.yaml
+   ```
+
+3. Start STATA in a third terminal:
+   ```bash
+   cargo run -p dtn-hdy-ham -- --config examples/stata-dw-ltp.yaml
+   ```
+
+4. Transmit a bundle from STATA to STATB:
+   ```bash
+   curl -X POST http://127.0.0.1:8081/api/v1/bundles \
+     -H "Content-Type: application/json" \
+     -d '{"destination": "dtn://statb.ampr.org/chat", "payload": "Hello from STATA via Direwolf!"}'
+   ```
+
+5. Transmit a reply bundle from STATB back to STATA:
+   ```bash
+   curl -X POST http://127.0.0.1:8082/api/v1/bundles \
+     -H "Content-Type: application/json" \
+     -d '{"destination": "dtn://stata.ampr.org/chat", "payload": "Hello back from STATB via Direwolf!"}'
+   ```
+
+
 
 

@@ -1,0 +1,28 @@
+# Station A (STATA) using LTP over Direwolf KISS TCP (Station A KISS port 8001)
+node-id: "dtn://stata.ampr.org/"
+callsign: "STATA"
+
+storage:
+  data-dir: "/tmp/dtn-stata"
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3050"
+
+web:
+  address: "127.0.0.1:8081"
+
+clas:
+  - name: "ltp-direwolf-a"
+    type: "ltp"
+    engine-id: 1
+    rtt: "2s"
+    ack-margin: "1s"
+    transport:
+      type: "kiss-tcp"
+      server-addr: "127.0.0.1:8001"
+      port: 0
+      min-frame-len: 15
+    peers:
+      - engine-id: 2
+        node-id: "dtn://statb.ampr.org/"

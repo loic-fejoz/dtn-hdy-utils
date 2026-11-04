@@ -17,7 +17,7 @@ use hardy_bpv7::bundle::Id;
 use hardy_bpv7::eid::NodeId;
 use hardy_ltp::engine::{Engine, EngineConfig, Notice};
 use hardy_ltp::kiss::{Command, decode_frame, encode_frame};
-use hardy_ltp::segment::Segment;
+use hardy_ltp::segment::{Extension, Segment};
 use hardy_ltp::types::{EngineId, SessionId};
 
 use crate::cla::engine_id_to_cla_address;
@@ -74,6 +74,34 @@ pub struct Driver {
     engine_to_node: HashMap<EngineId, NodeId>,
     pending_transfers: HashMap<SessionId, Id>,
     green_reassemblies: HashMap<SessionId, GreenReassembly>,
+}
+
+/// Minimum frame length required by standard packet radio TNCs (e.g. Direwolf).
+/// Ensures an LTP segment is padded to at least `min_frame_len` bytes using an
+/// RFC 5326 trailer extension so that it is accepted by packet radio TNCs (such as Direwolf).
+/// If `min_frame_len` is 0 or if the segment is already long enough, no padding is applied.
+#[must_use]
+pub fn pad_segment_for_tnc(bytes: &[u8], min_frame_len: usize) -> std::borrow::Cow<'_, [u8]> {
+    if min_frame_len == 0 || bytes.len() >= min_frame_len {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+
+    if let Ok((mut seg, consumed)) = Segment::parse(bytes)
+        && consumed == bytes.len()
+        && seg.trailer_ext.len() < 15
+    {
+        let cur_len = bytes.len();
+        let pad_len = min_frame_len.saturating_sub(cur_len + 2);
+        let pad_zeros = vec![0u8; pad_len];
+        seg.trailer_ext.push(Extension {
+            tag: 0,
+            value: &pad_zeros,
+        });
+        let padded = seg.encode_to_vec();
+        return std::borrow::Cow::Owned(padded);
+    }
+
+    std::borrow::Cow::Borrowed(bytes)
 }
 
 impl Driver {
@@ -148,6 +176,7 @@ impl Driver {
                 port,
                 reconnect_initial_delay,
                 reconnect_max_delay,
+                min_frame_len,
             } => {
                 self.run_kiss_tcp(
                     server_addr,
@@ -155,6 +184,7 @@ impl Driver {
                     port,
                     reconnect_initial_delay,
                     reconnect_max_delay,
+                    min_frame_len,
                     addr_tx,
                 )
                 .await
@@ -298,6 +328,7 @@ impl Driver {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_kiss_tcp(
         &mut self,
         server_addr: SocketAddr,
@@ -305,6 +336,7 @@ impl Driver {
         port: u8,
         reconnect_initial_delay: Duration,
         reconnect_max_delay: Duration,
+        min_frame_len: usize,
         addr_tx: oneshot::Sender<std::io::Result<SocketAddr>>,
     ) -> Result<()> {
         // Signal server address immediately so on_register does not block
@@ -349,7 +381,8 @@ impl Driver {
                     // Drain any output segments queued while disconnected in a single batched buffer
                     let mut frame_buf = Vec::new();
                     while let Some((_peer, bytes)) = self.engine.poll_output() {
-                        encode_frame(port, Command::Data, &bytes, &mut frame_buf);
+                        let payload = pad_segment_for_tnc(&bytes, min_frame_len);
+                        encode_frame(port, Command::Data, &payload, &mut frame_buf);
                     }
                     let mut write_err = false;
                     if !frame_buf.is_empty()
@@ -447,7 +480,8 @@ impl Driver {
                             // Drain outputs over KISS in batches with a single write_all
                             let mut frame_buf = Vec::new();
                             while let Some((_peer, bytes)) = self.engine.poll_output() {
-                                encode_frame(port, Command::Data, &bytes, &mut frame_buf);
+                                let payload = pad_segment_for_tnc(&bytes, min_frame_len);
+                                encode_frame(port, Command::Data, &payload, &mut frame_buf);
                             }
                             if !frame_buf.is_empty()
                                 && let Err(e) = writer.write_all(&frame_buf).await
