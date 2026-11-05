@@ -29,7 +29,8 @@ By combining `dtn-hdy-ham`'s high-performance in-process Rust BPA (`hardy`), its
 | **System Event Logs** | Dedicated `SystemLogScreen` | Terminal logs only | **WP4**: Web-based real-time log viewer with filter & search |
 | **SenML Telemetry** | `SENML_LAST` cards & `SENML_GRAPH` time series | None | **WP5**: RFC 8428 SenML decoder, sensor card dashboard & historical charts |
 | **Service Registry** | Dynamic registration of local EIDs & Viewer Types | Static YAML config + Service Tracker | **WP6**: Register/deregister services with UI viewer binding |
-| **Static Routing & BPSec** | Rule editor + BIB key management | YAML config only | **WP6**: Route manager + BIB key vault & verification policy |
+| **Static Routing** | Rule editor in settings | Static YAML config only | **Phase 3ter**: In-browser Route Manager, immediate hot-reload, auto-peering routes |
+| **BPSec Security** | BIB key management & verification policy | YAML config only | **Phase 6**: BIB key vault & HMAC verification policy |
 | **Mobile & Field Ergonomics** | Native Android APK | Web responsive layout + mic recording | **WP7**: Progressive Web App (PWA) offline install & touch layout |
 
 ---
@@ -158,6 +159,39 @@ flowchart TD
 
 ---
 
+### Phase 3ter: Dynamic Static Routing & Out-of-the-Box TCPCLv4 Peering
+> **Goal**: Enable interactive adding and deleting of static routes via the web console with immediate RIB application, and provide a turnkey, zero-configuration experience for pure TCPCLv4 amateur radio networking with gateway peering (e.g. F4JXQ) and scheduled contact windows (ADR 0014).
+
+#### Deliverables:
+1. **Dynamic Route Manager & Immediate BPA Application (`RouteManager`)**:
+   * Implement a persistent `HamRoutingAgent` that retains Hardy BPA's `RoutingSink` during daemon execution.
+   * Add REST endpoints (`/api/v1/routes`):
+     * `GET /api/v1/routes`: List all active static routes with pattern, destination CLA / next-hop, and priority.
+     * `POST /api/v1/routes`: Add a new static route with immediate push into the BPA RIB without restarting the daemon.
+     * `DELETE /api/v1/routes`: Remove a static route with immediate unrouting from the BPA RIB.
+   * Persist added and deleted routes to the YAML configuration file (`routes` block) or static routes file to survive daemon restarts.
+2. **Automated Initialization with F4JXQ Peer & Default Route**:
+   * In the setup wizard (`dtn-hdy-ham --wizard`), when the operator confirms connecting to peer F4JXQ via TCPCLv4:
+     * Automatically insert the static route `pattern: "dtn://f4jxq-9/*"` with `next-hop: "dtn://f4jxq/"` (and CLA `tcpcl-f4jxq`).
+     * Offer adding the DTN Default Gateway route `pattern: "dtn://**"` -> `next-hop: "dtn://f4jxq/"` so that traffic for any amateur radio correspondent routes seamlessly through the gateway.
+   * Include permissive default RFC 9171 validation settings (`primary-block-integrity: false`, `bundle-age-required: false`) in generated configs to ensure immediate interoperability with mobile and third-party BPv7 implementations.
+3. **TCPCLv4 Startup Connection & Contact Coordinator Schedule (43 min)**:
+   * **Startup Dial & Continuous Health**: Initiate the TCPCLv4 session immediately upon daemon startup and keep it open continuously as long as the link is healthy.
+   * **Contact Coordinator Integration**: Bind TCPCLv4 to the existing `ContactCoordinator` engine with a default recurring period of 43 minutes (`*/43 * * * *`) acting as a periodic contact probe and reconnect gardian if the link dropped.
+   * **No On-Demand Dial on Outbox Injection**: Bundles queued while the link is closed remain safely in the local BPA Outbox without triggering uncontrolled immediate dial attempts (accommodating alternate hamradio CLAs or awaiting hamnet readiness).
+   * **Manual Connect Override**: Retain the on-demand connect trigger in the UI so operators can force an immediate reconnection at any time.
+4. **Real-Time TCPCLv4 Connection & Outbox Visual Status Indicators**:
+   * Display live connection state badges (Connected 🟢, Disconnected 🔴, Dialing 🟡) for TCPCLv4 peers in the web console.
+   * Render explicit store-and-forward Outbox status (⏳ *Queued in BPA Outbox*) on pending messages and file bundles.
+5. **Frontend Routes Management Interface (`RoutesView.tsx` / `ConfigView.tsx`)**:
+   * Table of configured static routes with status, pattern matching preview, and delete button.
+   * Modal form to add a new route: Pattern input (e.g. `dtn://f4jxq-9/*`), next-hop EID (e.g. `dtn://f4jxq/`), and target CLA selector.
+   * Instant reactivity: route creation takes effect immediately in the routing table and autocomplete lists.
+6. **Enhanced Peer Suggestions**:
+   * Expand chat and send bundle autocomplete candidates to include targets derived from active static routes (e.g. `dtn://f4jxq-9/chat` and `dtn://f4jxq-9/files`).
+
+---
+
 ### Phase 4: Real-Time Event Push & Live Tracing Console (`SYSTEM_LOG`)
 > **Goal**: Eliminate manual refreshing and provide live observability into radio links, bundle receptions, and daemon diagnostics.
 
@@ -197,18 +231,15 @@ flowchart TD
 
 ---
 
-### Phase 6: Service Registry, Static Routing & BPSec Security Management
-> **Goal**: Enable interactive, in-browser administration of node services, routing tables, and BPSec authentication policies without manual YAML editing.
+### Phase 6: Service Registry & BPSec Security Management
+> **Goal**: Enable interactive, in-browser administration of custom node services and BPSec authentication policies without manual YAML editing.
 
 #### Deliverables:
 1. **Local Service Registry (`/api/v1/services`)**:
    * Define additional service EIDs (e.g. `dtn://<callsign>/files`, `dtn://beacon/`, `dtn://<callsign>/telemetry`).
    * Assign visual viewer modes (`CHAT`, `BUNDLE_LIST`, `SENML_LAST`).
    * Enable/disable multicast/broadcast promiscuous listening.
-2. **Static Route Editor (`/api/v1/routes`)**:
-   * Add, inspect, and remove EID prefix/pattern routes dynamically.
-   * Next-hop CLA assignment with reachability health checks.
-3. **BPSec BIB Key & Policy Vault (`/api/v1/security`)**:
+2. **BPSec BIB Key & Policy Vault (`/api/v1/security`)**:
    * Manage HMAC-SHA256 symmetric keys (RFC 9103) for bundle signing and verification.
    * Configurable validation policy: *No Check*, *Warn Only*, or *Strict Rejection*.
    * Key status and signature validation summary cards.

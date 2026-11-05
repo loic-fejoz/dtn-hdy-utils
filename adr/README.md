@@ -17,4 +17,5 @@ This directory contains records of the major architectural and design decisions 
 11. [ADR 11: Bundle Storage Inspector & Multi-Format Viewer for `dtn-hdy-ham`](0011-bundle-storage-inspector-and-viewer.md)
 12. [ADR 12: Dedicated Interactive Chat Service for `dtn-hdy-ham`](0012-dedicated-interactive-chat-service.md)
 13. [ADR 13: Dedicated Internal Files Service, BUNDLE_LIST Viewer & Sticky Retention Policy](0013-internal-files-service-and-sticky-retention.md)
+14. [ADR 14: Dynamic Static Routing, Out-of-the-Box Gateway Peering & TCPCL Contact Coordinator](0014-dynamic-static-routing-and-tcpcl-peering-coordinator.md)
 
