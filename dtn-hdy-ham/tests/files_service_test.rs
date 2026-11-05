@@ -68,6 +68,7 @@ async fn test_files_service_workflow_and_degraded_cases() {
         cla_manager,
         chat_manager,
         internal_storage: internal_storage.clone(),
+        route_manager: server.route_manager(),
     };
     let app = create_router(state);
 
@@ -435,6 +436,7 @@ async fn test_files_payload_range_requests_and_mime_detection() {
         cla_manager: server.cla_manager(),
         chat_manager: server.chat_manager(),
         internal_storage,
+        route_manager: server.route_manager(),
     };
     let app = create_router(app_state);
 

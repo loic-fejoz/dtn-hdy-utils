@@ -28,6 +28,7 @@ async fn test_ham_server_in_memory_startup() {
             ..Default::default()
         }),
         policy: None,
+        schedule: None,
     });
 
     // 2. Add LTP CLA with UDP transport
@@ -42,6 +43,7 @@ async fn test_ham_server_in_memory_startup() {
         name: "ham-ltp".to_string(),
         cla_type: ClaType::Ltp(ltp_cfg),
         policy: None,
+        schedule: None,
     });
 
     // 3. Add HQFBP CLA with UDP transport
@@ -57,6 +59,7 @@ async fn test_ham_server_in_memory_startup() {
         name: "ham-hqfbp".to_string(),
         cla_type: ClaType::Hqfbp(hqfbp_cfg),
         policy: None,
+        schedule: None,
     });
 
     let server = HamServer::new(config)
@@ -212,6 +215,7 @@ async fn test_ham_web_api_routes() {
         cla_manager,
         chat_manager,
         internal_storage,
+        route_manager: server.route_manager(),
     };
     let app = create_router(state);
 

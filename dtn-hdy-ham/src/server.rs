@@ -9,7 +9,6 @@ use hardy_bpa::{
     bpa::Bpa,
     cla::{Cla, ClaInit},
     node_ids::NodeIds,
-    routing::{RouteAction, StaticRoutingAgent},
     storage::{BundleStorage, MetadataStorage},
 };
 use hardy_localdisk_storage::LocalDiskStorage;
@@ -34,6 +33,7 @@ pub struct HamServer {
     web_injector: Option<WebBundleInjector>,
     cla_manager: crate::cla_manager::ClaManager,
     chat_manager: crate::chat_manager::ChatManager,
+    route_manager: Arc<crate::routing::RouteManager>,
     _ephemeral_dir: Option<tempfile::TempDir>,
     tasks: TaskPool,
 }
@@ -122,21 +122,12 @@ impl HamServer {
             builder = builder.bundle_age_required(enabled);
         }
 
-        // 3. Register Static Routes if configured
-        if !config.routes.is_empty() {
-            let mut routes = Vec::new();
-            for r in &config.routes {
-                let pattern = r.pattern.parse().context("Invalid route pattern")?;
-                let via_eid = if let Some(ref hop) = r.next_hop {
-                    hop.parse().context("Invalid next_hop EID")?
-                } else {
-                    hardy_bpv7::eid::Eid::Null
-                };
-                routes.push((pattern, RouteAction::Via(via_eid), 100));
-            }
-            let routing_agent = Arc::new(StaticRoutingAgent::new(&routes));
-            builder = builder.routing_agent("ham_static_routes".to_string(), routing_agent);
-        }
+        // 3. Register Dynamic Route Manager
+        let route_manager = Arc::new(crate::routing::RouteManager::new(
+            config.routes.clone(),
+            config.config_path.clone(),
+        ));
+        builder = builder.routing_agent("ham_routes".to_string(), route_manager.clone());
 
         // 4. Configure CLAs
         let mut tcp_peers = Vec::new();
@@ -182,6 +173,43 @@ impl HamServer {
                                     for addr in addrs {
                                         resolved_peers.push(addr);
                                         cla_manager.register_tcp_peer(cla.clone(), addr).await;
+
+                                        // Register ContactCoordinator for TCPCL if schedule configured
+                                        if let Some(ref sched) = cla_config.schedule {
+                                            match sched {
+                                                ScheduleConfig::Recurring { cron, duration } => {
+                                                    if let Ok(cron_expr) =
+                                                        crate::coordinator::cron::CronExpr::parse(
+                                                            cron,
+                                                        )
+                                                    {
+                                                        let dur = *duration;
+                                                        let endpoint = Arc::new(
+                                                            crate::coordinator::endpoint::TcpclContactEndpoint::new(
+                                                                cla_manager.clone(),
+                                                                addr,
+                                                            ),
+                                                        );
+                                                        let target = ContactTarget {
+                                                            callsign: addr.to_string(),
+                                                            node_id: "dtn:none".parse().unwrap(),
+                                                            schedule: ContactSchedule::Recurring {
+                                                                cron: cron_expr,
+                                                                duration: dur,
+                                                            },
+                                                            grace_period:
+                                                                std::time::Duration::from_secs(30),
+                                                        };
+                                                        let coordinator = ContactCoordinator::new(
+                                                            endpoint,
+                                                            vec![target],
+                                                        );
+                                                        coordinators.push(coordinator);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -365,6 +393,7 @@ impl HamServer {
             web_injector,
             cla_manager,
             chat_manager,
+            route_manager,
             _ephemeral_dir: ephemeral_dir,
             tasks,
         })
@@ -450,6 +479,7 @@ impl HamServer {
             for peer_addr in addrs {
                 let peer_addr = *peer_addr;
                 let cla = cla.clone();
+                let cla_manager = self.cla_manager.clone();
                 let cancel = self.tasks.cancel_token().clone();
                 hardy_async::spawn!(self.tasks, "tcpcl_peer_connector", async move {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -460,9 +490,21 @@ impl HamServer {
                                 match res {
                                     Ok(()) => {
                                         info!("Successfully connected to TCPCL peer {}", peer_addr);
+                                        cla_manager
+                                            .set_peer_status(
+                                                peer_addr,
+                                                crate::cla_manager::PeerConnectionStatus::Connected,
+                                            )
+                                            .await;
                                         break;
                                     }
                                     Err(e) => {
+                                        cla_manager
+                                            .set_peer_status(
+                                                peer_addr,
+                                                crate::cla_manager::PeerConnectionStatus::Disconnected,
+                                            )
+                                            .await;
                                         tracing::debug!(
                                             "TCPCL connect to {} failed ({}), retrying in 1s...",
                                             peer_addr,
@@ -504,6 +546,7 @@ impl HamServer {
                 cla_manager: self.cla_manager.clone(),
                 chat_manager: self.chat_manager.clone(),
                 internal_storage: self.chat_manager.clone(),
+                route_manager: self.route_manager.clone(),
             };
             let cancel = self.tasks.cancel_token().clone();
             let addr = web_config.address;
@@ -536,6 +579,12 @@ impl HamServer {
     pub async fn shutdown(&self) {
         self.tasks.shutdown().await;
         self.bpa.shutdown().await;
+    }
+
+    /// Accessor for the dynamic route manager.
+    #[must_use]
+    pub fn route_manager(&self) -> Arc<crate::routing::RouteManager> {
+        self.route_manager.clone()
     }
 
     /// Accessor for the active configuration.

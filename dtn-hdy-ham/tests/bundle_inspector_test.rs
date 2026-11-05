@@ -64,6 +64,7 @@ async fn test_bundle_inspector_endpoints_and_lifecycle() {
         cla_manager,
         chat_manager,
         internal_storage,
+        route_manager: server.route_manager(),
     };
     let app = create_router(state);
 
@@ -264,6 +265,7 @@ async fn test_in_memory_bundle_inspector_and_connect_peer() {
             },
         ),
         policy: None,
+        schedule: None,
     });
 
     let server = HamServer::new(config.clone())
@@ -283,6 +285,7 @@ async fn test_in_memory_bundle_inspector_and_connect_peer() {
         cla_manager,
         chat_manager,
         internal_storage,
+        route_manager: server.route_manager(),
     };
     let app = create_router(state);
 

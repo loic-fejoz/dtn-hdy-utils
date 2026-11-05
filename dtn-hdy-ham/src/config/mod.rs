@@ -48,6 +48,10 @@ pub struct HamConfig {
     /// RFC 9171 ingress validation policy toggles.
     #[serde(default)]
     pub rfc9171_validity: Option<Rfc9171ValidityConfig>,
+
+    /// Optional filesystem path this configuration was loaded from.
+    #[serde(skip)]
+    pub config_path: Option<PathBuf>,
 }
 
 impl Default for HamConfig {
@@ -62,6 +66,7 @@ impl Default for HamConfig {
             clas: Vec::new(),
             routes: Vec::new(),
             rfc9171_validity: Some(Rfc9171ValidityConfig::default()),
+            config_path: None,
         }
     }
 }
@@ -239,12 +244,13 @@ impl HamConfig {
         if let Some(config_file) = candidate_path {
             tracing::info!("Loading configuration from {}", config_file.display());
             let s = config::Config::builder()
-                .add_source(config::File::from(config_file))
+                .add_source(config::File::from(config_file.clone()))
                 .build()
                 .map_err(|e| anyhow::anyhow!("Failed to read configuration: {e}"))?;
             let mut cfg = s
                 .try_deserialize::<HamConfig>()
                 .map_err(|e| anyhow::anyhow!("Failed to parse configuration: {e}"))?;
+            cfg.config_path = Some(config_file);
             cfg.normalize();
             Ok(cfg)
         } else {

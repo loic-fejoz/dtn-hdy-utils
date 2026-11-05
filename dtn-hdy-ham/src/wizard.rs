@@ -251,11 +251,18 @@ pub fn run_wizard<R: BufRead, W: Write>(
     address: "0.0.0.0:{tcpcl_listen_port}"
     require-tls: false
     peers:
-      - "44.27.131.233:4556""#
+      - "44.27.131.233:4556"
+    schedule:
+      type: "recurring"
+      cron: "*/43 * * * *"
+      duration: "300s""#
         ));
         routes_yaml.push_str(
             r#"routes:
-  - pattern: "dtn://f4jxq-9/**"
+  - pattern: "dtn://f4jxq-9/*"
+    cla: "tcpcl-f4jxq"
+    next-hop: "dtn://f4jxq/"
+  - pattern: "dtn://**"
     cla: "tcpcl-f4jxq"
     next-hop: "dtn://f4jxq/""#,
         );
@@ -279,6 +286,10 @@ grpc:
 
 web:
   address: "{web_address}"
+
+rfc9171-validity:
+  primary-block-integrity: false
+  bundle-age-required: false
 
 {clas_yaml}
 
@@ -390,8 +401,9 @@ mod tests {
         assert_eq!(cfg.node_id, "dtn://f4xyz/");
         assert_eq!(cfg.clas.len(), 1);
         assert_eq!(cfg.clas[0].name, "tcpcl-f4jxq");
-        assert_eq!(cfg.routes.len(), 1);
-        assert_eq!(cfg.routes[0].pattern, "dtn://f4jxq-9/**");
+        assert_eq!(cfg.routes.len(), 2);
+        assert_eq!(cfg.routes[0].pattern, "dtn://f4jxq-9/*");
+        assert_eq!(cfg.routes[1].pattern, "dtn://**");
         assert_eq!(cfg.web.unwrap().address, "127.0.0.1:8088".parse().unwrap());
         assert!(save_target.exists());
 

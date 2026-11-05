@@ -33,3 +33,50 @@ impl ContactExecutionEndpoint for hardy_mercury_cla::MercuryCla {
         self.is_connected().await
     }
 }
+
+/// A contact execution endpoint that manages scheduled contact windows for TCPCLv4 peers.
+pub struct TcpclContactEndpoint {
+    cla_manager: crate::cla_manager::ClaManager,
+    peer_addr: std::net::SocketAddr,
+}
+
+impl TcpclContactEndpoint {
+    /// Creates a new `TcpclContactEndpoint`.
+    pub fn new(
+        cla_manager: crate::cla_manager::ClaManager,
+        peer_addr: std::net::SocketAddr,
+    ) -> Self {
+        Self {
+            cla_manager,
+            peer_addr,
+        }
+    }
+}
+
+#[async_trait]
+impl ContactExecutionEndpoint for TcpclContactEndpoint {
+    async fn start_contact(
+        &self,
+        _callsign: &str,
+        _node_id: Option<&NodeId>,
+    ) -> Result<(), String> {
+        tracing::info!(
+            "Scheduled contact window opened for TCPCL peer {}",
+            self.peer_addr
+        );
+        self.cla_manager
+            .connect_peer(&self.peer_addr.to_string())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn end_contact(&self, _callsign: &str) -> Result<(), String> {
+        // ADR 0014: Keep session alive as long as it is healthy.
+        // The coordinator acts as a periodic probe / reconnect gardian.
+        Ok(())
+    }
+
+    async fn is_active(&self) -> bool {
+        self.cla_manager.is_peer_connected(&self.peer_addr).await
+    }
+}

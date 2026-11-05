@@ -1,10 +1,24 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 
 export interface ActiveService {
   eid: string;
   type: string;
   registered_at: string;
+}
+
+export interface RouteItem {
+  pattern: string;
+  cla: string;
+  'next-hop'?: string | null;
+  next_hop?: string | null;
+  priority?: number;
+}
+
+export interface PeerStatusInfo {
+  address: string;
+  status: 'connected' | 'disconnected' | 'connecting';
+  last_attempt_at: string | null;
 }
 
 export interface StationConfig {
@@ -30,11 +44,7 @@ export interface StationConfig {
     type: string;
     [key: string]: any;
   }>;
-  routes: Array<{
-    pattern: string;
-    cla: string;
-    [key: string]: any;
-  }>;
+  routes: Array<RouteItem>;
 }
 
 interface ConfigViewProps {
@@ -52,6 +62,73 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
     success: boolean;
     text: string;
   } | null>(null);
+
+  // Dynamic Static Routes state
+  const [routes, setRoutes] = useState<RouteItem[]>(config?.routes || []);
+  const [routesLoading, setRoutesLoading] = useState(false);
+  const [showAddRouteForm, setShowAddRouteForm] = useState(false);
+  const [newPattern, setNewPattern] = useState('');
+  const [newCla, setNewCla] = useState(config?.clas?.[0]?.name || '');
+  const [newNextHop, setNewNextHop] = useState('');
+  const [routeMessage, setRouteMessage] = useState<{
+    success: boolean;
+    text: string;
+  } | null>(null);
+  const [addingRoute, setAddingRoute] = useState(false);
+  const [deletingPattern, setDeletingPattern] = useState<string | null>(null);
+
+  // Peer Connection Statuses state
+  const [peerStatuses, setPeerStatuses] = useState<Record<string, PeerStatusInfo>>({});
+
+  const fetchRoutes = async () => {
+    try {
+      setRoutesLoading(true);
+      const res = await fetch('/api/v1/routes');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setRoutes(data);
+        }
+      }
+    } catch {
+      // Keep existing routes on failure
+    } finally {
+      setRoutesLoading(false);
+    }
+  };
+
+  const fetchPeerStatuses = async () => {
+    try {
+      const res = await fetch('/api/v1/clas/status');
+      if (res.ok) {
+        const data: PeerStatusInfo[] = await res.json();
+        const map: Record<string, PeerStatusInfo> = {};
+        for (const item of data) {
+          map[item.address] = item;
+        }
+        setPeerStatuses(map);
+      }
+    } catch {
+      // Ignore network errors on polling
+    }
+  };
+
+  useEffect(() => {
+    fetchRoutes();
+    fetchPeerStatuses();
+
+    const interval = setInterval(fetchPeerStatuses, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (config?.routes && routes.length === 0) {
+      setRoutes(config.routes);
+    }
+    if (!newCla && config?.clas?.[0]?.name) {
+      setNewCla(config.clas[0].name);
+    }
+  }, [config]);
 
   const handleForceConnect = async (peerStr: string) => {
     setConnectingPeer(peerStr);
@@ -82,6 +159,93 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
       });
     } finally {
       setConnectingPeer(null);
+      fetchPeerStatuses();
+    }
+  };
+
+  const handleAddRoute = async (e: Event) => {
+    e.preventDefault();
+    if (!newPattern.trim()) {
+      setRouteMessage({ success: false, text: 'Route pattern cannot be empty' });
+      return;
+    }
+    const targetCla = newCla.trim() || config?.clas?.[0]?.name || 'default';
+
+    setAddingRoute(true);
+    setRouteMessage(null);
+    try {
+      const body: any = {
+        pattern: newPattern.trim(),
+        cla: targetCla,
+      };
+      if (newNextHop.trim()) {
+        body['next-hop'] = newNextHop.trim();
+      }
+
+      const res = await fetch('/api/v1/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRouteMessage({
+          success: true,
+          text: `Route '${newPattern.trim()}' successfully added and injected into BPA RIB`,
+        });
+        setNewPattern('');
+        setNewNextHop('');
+        setShowAddRouteForm(false);
+        await fetchRoutes();
+        setTimeout(() => setRouteMessage(null), 5000);
+      } else {
+        setRouteMessage({
+          success: false,
+          text: data.error || `Failed to add route: HTTP ${res.status}`,
+        });
+      }
+    } catch (err: any) {
+      setRouteMessage({
+        success: false,
+        text: err.message || 'Failed to add static route',
+      });
+    } finally {
+      setAddingRoute(false);
+    }
+  };
+
+  const handleDeleteRoute = async (pattern: string) => {
+    if (!confirm(`Are you sure you want to delete static route '${pattern}'?`)) {
+      return;
+    }
+
+    setDeletingPattern(pattern);
+    setRouteMessage(null);
+    try {
+      const res = await fetch(`/api/v1/routes?pattern=${encodeURIComponent(pattern)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRouteMessage({
+          success: true,
+          text: `Route '${pattern}' removed from BPA RIB and config`,
+        });
+        await fetchRoutes();
+        setTimeout(() => setRouteMessage(null), 5000);
+      } else {
+        setRouteMessage({
+          success: false,
+          text: data.error || `Failed to delete route: HTTP ${res.status}`,
+        });
+      }
+    } catch (err: any) {
+      setRouteMessage({
+        success: false,
+        text: err.message || `Failed to delete route '${pattern}'`,
+      });
+    } finally {
+      setDeletingPattern(null);
     }
   };
 
@@ -103,8 +267,12 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
           </div>
           <p class="mt-2 text-sm text-red-700 dark:text-red-300">{error}</p>
           <button
-            onClick={onRefresh}
-            class="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition"
+            onClick={() => {
+              onRefresh();
+              fetchRoutes();
+              fetchPeerStatuses();
+            }}
+            class="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition cursor-pointer"
           >
             Retry
           </button>
@@ -127,20 +295,24 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
             </span>
           </h2>
           <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Active BPv7 parameters and convergence layer adapters in read-only mode
+            Active BPv7 parameters, dynamic routing and convergence layer adapters
           </p>
         </div>
         <div class="flex items-center space-x-2">
           <button
             onClick={() => setShowRawJson(!showRawJson)}
-            class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+            class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition cursor-pointer"
           >
             {showRawJson ? 'Hide JSON' : 'View JSON'}
           </button>
           <button
-            onClick={onRefresh}
+            onClick={() => {
+              onRefresh();
+              fetchRoutes();
+              fetchPeerStatuses();
+            }}
             disabled={loading}
-            class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1.5"
+            class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
             <span>🔄</span>
             <span>Refresh</span>
@@ -342,7 +514,7 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
                         <span>{connectMessage.success ? '✓' : '⚠️'} {connectMessage.text}</span>
                         <button
                           onClick={() => setConnectMessage(null)}
-                          class="text-xs hover:underline ml-2"
+                          class="text-xs hover:underline ml-2 cursor-pointer"
                         >
                           ✕
                         </button>
@@ -356,6 +528,8 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
                             ? peer
                             : peer.address || peer.callsign || peer['node-id'] || '';
                         const isConnecting = connectingPeer === peerTarget;
+                        const statusObj = peerStatuses[peerTarget] || (typeof peer === 'string' ? peerStatuses[peer] : undefined);
+                        const status = statusObj?.status || 'disconnected';
 
                         return (
                           <div class="bg-white dark:bg-slate-900/80 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700/80">
@@ -371,16 +545,32 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
                                 )}
                               </div>
 
-                              {/* Manual Connect Button */}
-                              <button
-                                onClick={() => handleForceConnect(peerTarget)}
-                                disabled={isConnecting}
-                                title={`Force connection to peer ${peerTarget}`}
-                                class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                              >
-                                <span>{isConnecting ? '⏳' : '✋'}</span>
-                                <span>{isConnecting ? 'Connecting...' : 'Connect'}</span>
-                              </button>
+                              <div class="flex items-center space-x-2">
+                                {/* Peer Connection Status Badge */}
+                                <span
+                                  class={`px-2 py-0.5 text-[11px] font-semibold rounded-md flex items-center gap-1 border ${
+                                    status === 'connected'
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                                      : status === 'connecting'
+                                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                                  }`}
+                                >
+                                  <span>{status === 'connected' ? '🟢' : status === 'connecting' ? '🟡' : '🔴'}</span>
+                                  <span class="capitalize">{status}</span>
+                                </span>
+
+                                {/* Manual Connect Button */}
+                                <button
+                                  onClick={() => handleForceConnect(peerTarget)}
+                                  disabled={isConnecting}
+                                  title={`Force connection to peer ${peerTarget}`}
+                                  class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                >
+                                  <span>{isConnecting ? '⏳' : '✋'}</span>
+                                  <span>{isConnecting ? 'Connecting...' : 'Connect'}</span>
+                                </button>
+                              </div>
                             </div>
                             {peer.schedule && (
                               <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
@@ -402,23 +592,177 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
         )}
       </div>
 
-      {/* Static Routes Card */}
-      {config.routes && config.routes.length > 0 && (
-        <div class="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-          <div class="flex items-center space-x-2 border-b border-slate-100 dark:border-slate-700 pb-4 mb-4">
+      {/* Dynamic Static Routes Card */}
+      <div class="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
+        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-4 mb-4">
+          <div class="flex items-center space-x-2">
             <span class="text-lg">🗺️</span>
             <h3 class="text-base font-bold text-slate-900 dark:text-white">Static Routes</h3>
           </div>
-          <div class="divide-y divide-slate-100 dark:divide-slate-700 text-xs font-mono">
-            {config.routes.map((route) => (
-              <div class="py-2.5 flex items-center justify-between">
-                <span class="text-slate-700 dark:text-slate-300">{route.pattern}</span>
-                <span class="text-emerald-600 dark:text-emerald-400 font-semibold">via {route.cla}</span>
-              </div>
-            ))}
+          <div class="flex items-center space-x-2">
+            <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+              {routes.length} active
+            </span>
+            <button
+              onClick={() => {
+                setShowAddRouteForm(!showAddRouteForm);
+                setRouteMessage(null);
+              }}
+              class="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1 cursor-pointer"
+            >
+              <span>{showAddRouteForm ? '✕ Cancel' : '+ Add Route'}</span>
+            </button>
           </div>
         </div>
-      )}
+
+        {routeMessage && (
+          <div
+            class={`mb-4 p-3 rounded-xl text-xs font-medium border flex items-center justify-between ${
+              routeMessage.success
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : 'bg-red-50 dark:bg-red-950/60 border-red-300 dark:border-red-800 text-red-800 dark:text-red-300'
+            }`}
+          >
+            <span>{routeMessage.success ? '✓' : '⚠️'} {routeMessage.text}</span>
+            <button
+              onClick={() => setRouteMessage(null)}
+              class="text-xs hover:underline ml-2 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Add Route Inline Form */}
+        {showAddRouteForm && (
+          <form
+            onSubmit={handleAddRoute}
+            class="mb-6 p-4 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/30 space-y-3"
+          >
+            <div class="font-semibold text-xs text-emerald-800 dark:text-emerald-300">
+              Add New Static Route
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Destination Pattern *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. dtn://f4jxq-9/* or dtn:**"
+                  value={newPattern}
+                  onInput={(e: any) => setNewPattern(e.target.value)}
+                  class="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Target CLA *
+                </label>
+                {config.clas.length > 0 ? (
+                  <select
+                    value={newCla}
+                    onChange={(e: any) => setNewCla(e.target.value)}
+                    class="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    {config.clas.map((c) => (
+                      <option value={c.name}>{c.name} ({c.type})</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. tcpcl-f4jxq"
+                    value={newCla}
+                    onInput={(e: any) => setNewCla(e.target.value)}
+                    class="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  Next-Hop EID (optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. dtn://f4jxq/"
+                  value={newNextHop}
+                  onInput={(e: any) => setNewNextHop(e.target.value)}
+                  class="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAddRouteForm(false)}
+                class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={addingRoute}
+                class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer disabled:opacity-50"
+              >
+                {addingRoute ? 'Injecting into RIB...' : 'Add Route'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {routes.length === 0 ? (
+          <p class="text-sm text-slate-500 dark:text-slate-400 italic">No static routes configured.</p>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs font-mono divide-y divide-slate-100 dark:divide-slate-700">
+              <thead>
+                <tr class="text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
+                  <th class="py-2 px-3">Pattern</th>
+                  <th class="py-2 px-3">Next-Hop</th>
+                  <th class="py-2 px-3">CLA</th>
+                  <th class="py-2 px-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                {routes.map((route) => {
+                  const isDeleting = deletingPattern === route.pattern;
+                  const nextHop = route['next-hop'] || route.next_hop || 'direct';
+
+                  return (
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
+                      <td class="py-2.5 px-3 font-semibold text-slate-800 dark:text-slate-200">
+                        {route.pattern}
+                      </td>
+                      <td class="py-2.5 px-3 text-emerald-600 dark:text-emerald-400">
+                        {nextHop}
+                      </td>
+                      <td class="py-2.5 px-3 text-slate-600 dark:text-slate-400">
+                        via {route.cla}
+                      </td>
+                      <td class="py-2.5 px-3 text-right">
+                        <button
+                          onClick={() => handleDeleteRoute(route.pattern)}
+                          disabled={isDeleting}
+                          title={`Delete static route ${route.pattern}`}
+                          class="px-2 py-1 text-[11px] font-semibold rounded bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 transition cursor-pointer disabled:opacity-50"
+                        >
+                          {isDeleting ? 'Removing...' : '🗑️ Delete'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

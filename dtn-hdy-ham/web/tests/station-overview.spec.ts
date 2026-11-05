@@ -70,6 +70,45 @@ test.describe('Station Overview & Identity', () => {
       });
     });
 
+    // Mock static routes endpoint
+    await page.route('/api/v1/routes*', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(mockStationConfig.routes),
+        });
+      } else if (route.request().method() === 'POST') {
+        const postData = route.request().postDataJSON();
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'created', route: postData }),
+        });
+      } else if (route.request().method() === 'DELETE') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'deleted' }),
+        });
+      }
+    });
+
+    // Mock CLA peer status endpoint
+    await page.route('/api/v1/clas/status', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            address: '192.168.1.100:4556',
+            status: 'connected',
+            last_attempt_at: null,
+          },
+        ]),
+      });
+    });
+
     await page.goto('/');
   });
 
@@ -182,6 +221,23 @@ test.describe('Station Overview & Identity', () => {
     } else {
       await expect(html).not.toHaveClass(/dark/);
     }
+  });
+
+  test('displays peer connection status badge and allows adding a static route', async ({ page }) => {
+    // Check connected status badge is displayed
+    await expect(page.getByText('connected', { exact: false })).toBeVisible();
+
+    // Click "+ Add Route" button
+    await page.getByRole('button', { name: '+ Add Route' }).click();
+
+    // Fill in pattern
+    await page.locator('input[placeholder*="dtn://f4jxq-9/*"]').fill('dtn://f4jxq-9/*');
+
+    // Click submit "Add Route"
+    await page.getByRole('button', { name: 'Add Route', exact: true }).click();
+
+    // Check success notification appears
+    await expect(page.getByText(/Route .* successfully added/)).toBeVisible();
   });
 
   test('displays error message and retry button when config API fails', async ({ page }) => {

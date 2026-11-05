@@ -55,3 +55,9 @@ pub async fn connect_peer_handler(
             .into_response(),
     }
 }
+
+/// Handler for `GET /api/v1/clas/status` - Returns connection status for all registered peers.
+pub async fn get_peer_statuses(State(state): State<AppState>) -> impl IntoResponse {
+    let statuses = state.cla_manager.list_peer_statuses().await;
+    Json(statuses)
+}

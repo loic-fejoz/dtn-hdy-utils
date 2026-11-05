@@ -24,6 +24,7 @@ pub struct AppState {
     pub cla_manager: crate::cla_manager::ClaManager,
     pub chat_manager: crate::chat_manager::ChatManager,
     pub internal_storage: crate::internal_storage::InternalStorage,
+    pub route_manager: Arc<crate::routing::RouteManager>,
 }
 
 /// Builds the Axum router with API endpoints and SPA static asset fallback.
@@ -68,6 +69,13 @@ pub fn create_router(state: AppState) -> Router {
             get(routes::bundles::get_bundle_payload_handler),
         )
         .route("/clas/connect", post(routes::clas::connect_peer_handler))
+        .route("/clas/status", get(routes::clas::get_peer_statuses))
+        .route(
+            "/routes",
+            get(routes::static_routes::list_routes)
+                .post(routes::static_routes::add_route)
+                .delete(routes::static_routes::delete_route),
+        )
         .route(
             "/chat/conversations",
             get(routes::chat::list_conversations).post(routes::chat::create_conversation),

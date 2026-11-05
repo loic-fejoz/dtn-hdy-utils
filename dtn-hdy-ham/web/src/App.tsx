@@ -215,8 +215,8 @@ export function App() {
 
   // Collect known peer candidates from config safely
   const peerSuggestions: string[] = Array.from(
-    new Set(
-      (config?.clas || []).flatMap((c: any) => {
+    new Set([
+      ...(config?.clas || []).flatMap((c: any) => {
         const list: string[] = [];
         if (Array.isArray(c.peers)) {
           for (const p of c.peers) {
@@ -233,8 +233,18 @@ export function App() {
           list.push(...c.connect);
         }
         return list;
-      })
-    )
+      }),
+      ...(config?.routes || []).flatMap((r: any) => {
+        const list: string[] = [];
+        if (r.next_hop) list.push(r.next_hop);
+        if (r['next-hop']) list.push(r['next-hop']);
+        if (typeof r.pattern === 'string' && r.pattern.startsWith('dtn://') && !r.pattern.includes('**')) {
+          const clean = r.pattern.replace('dtn://', '').replace('/*', '').replace('*', '');
+          if (clean && !clean.includes('/')) list.push(clean);
+        }
+        return list;
+      }),
+    ])
   ).filter(Boolean);
 
   return (

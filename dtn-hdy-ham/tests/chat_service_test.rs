@@ -72,6 +72,7 @@ async fn test_chat_service_full_workflow() {
         cla_manager,
         chat_manager: chat_manager.clone(),
         internal_storage,
+        route_manager: server.route_manager(),
     };
     let app = create_router(state);
 

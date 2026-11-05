@@ -15,6 +15,9 @@ pub struct ClaConfig {
     /// Optional egress policy name.
     #[serde(default)]
     pub policy: Option<String>,
+    /// Optional contact schedule for this CLA.
+    #[serde(default)]
+    pub schedule: Option<ScheduleConfig>,
 }
 
 /// Supported CLA protocol engines.

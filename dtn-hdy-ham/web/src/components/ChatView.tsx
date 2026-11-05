@@ -545,7 +545,13 @@ export function ChatView({
                           >
                             <span>{formatMessageTime(m.created_at)}</span>
                             {isOutbound && (
-                              <span title={`Status: ${m.status}`}>
+                              <span
+                                title={
+                                  m.status === 'queued'
+                                    ? '⏳ Queued in local BPA Outbox (awaiting contact window or active session)'
+                                    : '📤 Sent'
+                                }
+                              >
                                 {m.status === 'queued' ? '⏳' : '📤'}
                               </span>
                             )}
