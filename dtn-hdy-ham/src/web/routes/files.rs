@@ -39,13 +39,18 @@ pub async fn get_file_details(
             let mut file_missing = false;
 
             if p.exists() {
-                if let Ok(bytes) = std::fs::read(p) {
-                    // Generate preview if text/markdown/json
-                    if record.mime_type.starts_with("text/")
-                        || record.mime_type == "application/json"
-                        || record.mime_type == "application/senml+json"
-                    {
-                        preview = Some(String::from_utf8_lossy(&bytes).to_string());
+                // Generate preview if text/markdown/json up to 64 KiB max
+                if record.mime_type.starts_with("text/")
+                    || record.mime_type == "application/json"
+                    || record.mime_type == "application/senml+json"
+                {
+                    use std::io::Read;
+                    if let Ok(file) = std::fs::File::open(p) {
+                        let mut buffer = Vec::new();
+                        let mut take = file.take(64 * 1024);
+                        if take.read_to_end(&mut buffer).is_ok() {
+                            preview = Some(String::from_utf8_lossy(&buffer).to_string());
+                        }
                     }
                 }
             } else {
@@ -186,7 +191,11 @@ pub async fn delete_file_bundle(
 /// GET /api/v1/files/unread - Returns unread count.
 pub async fn get_unread_count(State(state): State<AppState>) -> impl IntoResponse {
     match state.internal_storage.count_unread_files() {
-        Ok(count) => (StatusCode::OK, Json(json!({ "unread": count }))).into_response(),
+        Ok(count) => (
+            StatusCode::OK,
+            Json(json!({ "unread": count, "unread_count": count })),
+        )
+            .into_response(),
         Err(e) => internal_error(e).into_response(),
     }
 }

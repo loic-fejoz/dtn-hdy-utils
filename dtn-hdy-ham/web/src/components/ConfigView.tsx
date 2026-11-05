@@ -644,10 +644,11 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                <label for="route-pattern-input" class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
                   Destination Pattern *
                 </label>
                 <input
+                  id="route-pattern-input"
                   type="text"
                   required
                   placeholder="e.g. dtn://f4jxq-9/* or dtn:**"
@@ -658,11 +659,12 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
               </div>
 
               <div>
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                <label for="route-cla-select" class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
                   Target CLA *
                 </label>
                 {config.clas.length > 0 ? (
                   <select
+                    id="route-cla-select"
                     value={newCla}
                     onChange={(e: any) => setNewCla(e.target.value)}
                     class="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -673,6 +675,7 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
                   </select>
                 ) : (
                   <input
+                    id="route-cla-select"
                     type="text"
                     required
                     placeholder="e.g. tcpcl-f4jxq"
@@ -684,10 +687,11 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
               </div>
 
               <div>
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                <label for="route-nexthop-input" class="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
                   Next-Hop EID (optional)
                 </label>
                 <input
+                  id="route-nexthop-input"
                   type="text"
                   placeholder="e.g. dtn://f4jxq/"
                   value={newNextHop}

@@ -34,39 +34,45 @@ fn normalize_eid(s: &str) -> String {
 }
 
 /// If the payload is a WebM audio stream, attempts to remux it to Ogg Opus using ffmpeg if available.
-pub fn maybe_remux_webm_to_ogg(payload: Vec<u8>) -> Vec<u8> {
+pub async fn maybe_remux_webm_to_ogg(payload: Vec<u8>) -> Vec<u8> {
     // Matroska / WebM signature: 0x1A 0x45 0xDF 0xA3
     if payload.len() >= 4 && &payload[0..4] == b"\x1A\x45\xDF\xA3" {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
+        tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            use std::process::{Command, Stdio};
 
-        let mut child = match Command::new("ffmpeg")
-            .args([
-                "-y", "-v", "error", "-i", "pipe:0", "-c:a", "copy", "-f", "ogg", "pipe:1",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(_) => return payload,
-        };
+            let mut child = match Command::new("ffmpeg")
+                .args([
+                    "-y", "-v", "error", "-i", "pipe:0", "-c:a", "copy", "-f", "ogg", "pipe:1",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(_) => return payload,
+            };
 
-        if let Some(mut stdin) = child.stdin.take() {
-            let payload_clone = payload.clone();
-            std::thread::spawn(move || {
-                let _ = stdin.write_all(&payload_clone);
-            });
-        }
-
-        if let Ok(output) = child.wait_with_output() {
-            if output.status.success() && !output.stdout.is_empty() {
-                return output.stdout;
+            if let Some(mut stdin) = child.stdin.take() {
+                let payload_clone = payload.clone();
+                std::thread::spawn(move || {
+                    let _ = stdin.write_all(&payload_clone);
+                });
             }
-        }
+
+            if let Ok(output) = child.wait_with_output() {
+                if output.status.success() && !output.stdout.is_empty() {
+                    return output.stdout;
+                }
+            }
+            payload
+        })
+        .await
+        .unwrap_or_default()
+    } else {
+        payload
     }
-    payload
 }
 
 async fn build_and_inject_bundle(
@@ -76,7 +82,7 @@ async fn build_and_inject_bundle(
     lifetime_secs: Option<u64>,
     payload_bytes: Vec<u8>,
 ) -> Result<serde_json::Value, (StatusCode, String)> {
-    let payload_bytes = maybe_remux_webm_to_ogg(payload_bytes);
+    let payload_bytes = maybe_remux_webm_to_ogg(payload_bytes).await;
     if destination_str.trim().is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -281,11 +287,14 @@ pub async fn list_bundles(
                 Json(json!({ "error": "Bundle not found" })),
             )
                 .into_response(),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            )
-                .into_response(),
+            Err(e) => {
+                tracing::error!("get_bundle_detail error: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": e.to_string() })),
+                )
+                    .into_response()
+            }
         }
     } else {
         match crate::bundle_inspector::list_bundles_from_db(&db_path) {

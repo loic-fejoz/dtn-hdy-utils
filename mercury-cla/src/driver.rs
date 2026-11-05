@@ -71,6 +71,13 @@ pub struct Driver {
     peers: HashMap<String, NodeId>,
 }
 
+fn is_valid_callsign(call: &str) -> bool {
+    let call = call.trim();
+    !call.is_empty()
+        && call.len() <= 15
+        && call.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
 impl Driver {
     pub fn spawn(
         config: Config,
@@ -254,6 +261,10 @@ impl Driver {
 
                         match cmd {
                             DriverCommand::Connect { callsign, node_id, reply } => {
+                                if !is_valid_callsign(&callsign) || !is_valid_callsign(&self.config.my_callsign) {
+                                    let _ = reply.send(Err(Error::Control("Invalid callsign format".into())));
+                                    continue;
+                                }
                                 match session {
                                     SessionState::Disconnected => {
                                         let upper_call = callsign.to_uppercase();
@@ -348,10 +359,15 @@ impl Driver {
     }
 
     async fn init_mercury_tnc(&self, ctl: &mut TcpStream) -> Result<()> {
+        let mycall = self.config.my_callsign.trim().to_uppercase();
+        if !is_valid_callsign(&mycall) {
+            return Err(Error::Control(format!(
+                "Invalid configured my_callsign: {mycall}"
+            )));
+        }
         let setup = format!(
             "MYCALL {}\rBW{}\rLISTEN ON\r",
-            self.config.my_callsign.to_uppercase(),
-            self.config.bandwidth
+            mycall, self.config.bandwidth
         );
         ctl.write_all(setup.as_bytes()).await?;
         ctl.flush().await?;
@@ -364,6 +380,7 @@ impl Driver {
     ) {
         let mut buf = Vec::with_capacity(1024);
         let mut temp = [0u8; 256];
+        const MAX_CTL_BUF: usize = 4096;
 
         loop {
             match reader.read(&mut temp).await {
@@ -377,6 +394,13 @@ impl Driver {
                             return;
                         }
                     }
+                    if buf.len() > MAX_CTL_BUF {
+                        warn!(
+                            "Mercury TNC control buffer exceeded {} bytes without newline, dropping",
+                            MAX_CTL_BUF
+                        );
+                        buf.clear();
+                    }
                 }
                 Err(_) => break,
             }
@@ -385,6 +409,7 @@ impl Driver {
 
     async fn data_read_loop(mut reader: tokio::net::tcp::OwnedReadHalf, tx: mpsc::Sender<Bytes>) {
         let mut len_buf = [0u8; 4];
+        const MAX_MERCURY_FRAME: usize = 16 * 1024 * 1024; // 16 MiB max bundle over RF ARQ
 
         loop {
             if reader.read_exact(&mut len_buf).await.is_err() {
@@ -393,6 +418,13 @@ impl Driver {
             let length = u32::from_be_bytes(len_buf) as usize;
             if length == 0 {
                 continue;
+            }
+            if length > MAX_MERCURY_FRAME {
+                warn!(
+                    "Mercury TNC frame size {} exceeds maximum {}; aborting connection",
+                    length, MAX_MERCURY_FRAME
+                );
+                break;
             }
 
             let mut payload = vec![0u8; length];

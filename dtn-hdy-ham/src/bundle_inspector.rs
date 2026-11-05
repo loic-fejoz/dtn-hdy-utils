@@ -3,8 +3,36 @@
 use hardy_bpv7::bundle::Id as Bpv7Id;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::debug;
+
+/// Verifies that a storage filename is safe and contains no path traversal components.
+pub fn safe_payload_path(payload_dir: &Path, storage_name: &str) -> anyhow::Result<PathBuf> {
+    if storage_name.contains('\\') {
+        anyhow::bail!(
+            "Invalid storage_name path traversal attempt: {:?}",
+            storage_name
+        );
+    }
+    let name_path = Path::new(storage_name);
+    if name_path.is_absolute() {
+        anyhow::bail!(
+            "Invalid storage_name path traversal attempt: {:?}",
+            storage_name
+        );
+    }
+    for component in name_path.components() {
+        match component {
+            std::path::Component::Normal(_) => {}
+            _ => anyhow::bail!(
+                "Invalid storage_name path traversal attempt: {:?}",
+                storage_name
+            ),
+        }
+    }
+    let target = payload_dir.join(name_path);
+    Ok(target)
+}
 
 /// Summary metadata of a stored BPv7 bundle.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -321,7 +349,7 @@ pub async fn get_bundle_payload(
         return Ok(None);
     };
 
-    let payload_path = payload_dir.join(name);
+    let payload_path = safe_payload_path(payload_dir, &name)?;
     if !payload_path.exists() {
         return Ok(None);
     }
@@ -375,13 +403,17 @@ pub async fn get_bundle_detail(
                 .to_string(),
         )
     } else if !is_binary {
-        String::from_utf8(payload_bytes.clone()).ok()
+        const MAX_PREVIEW_BYTES: usize = 16 * 1024;
+        let preview_slice = &payload_bytes[..payload_bytes.len().min(MAX_PREVIEW_BYTES)];
+        String::from_utf8(preview_slice.to_vec()).ok()
     } else {
         None
     };
 
     let hex_dump = if is_binary && !payload_bytes.is_empty() {
-        Some(format_hex_dump(&payload_bytes))
+        const MAX_HEX_BYTES: usize = 4 * 1024;
+        let hex_slice = &payload_bytes[..payload_bytes.len().min(MAX_HEX_BYTES)];
+        Some(format_hex_dump(hex_slice))
     } else {
         None
     };
@@ -415,11 +447,11 @@ pub async fn delete_bundle_from_storage(
     };
 
     // Delete payload file if present
-    if let Some(ref name) = storage_name {
-        let payload_file = payload_dir.join(name);
-        if payload_file.exists() {
-            let _ = tokio::fs::remove_file(payload_file).await;
-        }
+    if let Some(ref name) = storage_name
+        && let Ok(payload_file) = safe_payload_path(payload_dir, name)
+        && payload_file.exists()
+    {
+        let _ = tokio::fs::remove_file(payload_file).await;
     }
 
     // Delete row from SQLite
@@ -429,6 +461,24 @@ pub async fn delete_bundle_from_storage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_safe_payload_path() {
+        let base = Path::new("/tmp/payloads");
+        assert!(safe_payload_path(base, "bundle_123.bin").is_ok());
+        assert!(safe_payload_path(base, "70/be/40352f2a").is_ok());
+        assert_eq!(
+            safe_payload_path(base, "70/be/40352f2a").unwrap(),
+            base.join("70/be/40352f2a")
+        );
+
+        assert!(safe_payload_path(base, "../etc/passwd").is_err());
+        assert!(safe_payload_path(base, "/etc/passwd").is_err());
+        assert!(safe_payload_path(base, "70/../passwd").is_err());
+        assert!(safe_payload_path(base, "..\\windows\\system32").is_err());
+        assert!(safe_payload_path(base, ".").is_err());
+        assert!(safe_payload_path(base, "..").is_err());
+    }
 
     #[test]
     fn test_infer_mime_type_images() {

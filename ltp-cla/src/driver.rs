@@ -738,6 +738,46 @@ impl Driver {
                         });
                     } else {
                         // Multi-segment green block reassembly
+                        const MAX_GREEN_REASSEMBLIES: usize = 64;
+                        const MAX_GREEN_BUNDLE_SIZE: usize = 16 * 1024 * 1024; // 16 MiB max green bundle
+
+                        let end_offset = match (offset as usize).checked_add(data.len()) {
+                            Some(end) => end,
+                            None => {
+                                warn!(
+                                    "integer overflow in Green segment offset {}; dropping",
+                                    offset
+                                );
+                                continue;
+                            }
+                        };
+
+                        if end_offset > MAX_GREEN_BUNDLE_SIZE {
+                            warn!(
+                                "Green segment session {:?} end offset {} exceeds max size {}; dropping",
+                                session, end_offset, MAX_GREEN_BUNDLE_SIZE
+                            );
+                            self.green_reassemblies.remove(&session);
+                            continue;
+                        }
+
+                        if !self.green_reassemblies.contains_key(&session)
+                            && self.green_reassemblies.len() >= MAX_GREEN_REASSEMBLIES
+                        {
+                            // Evict the oldest or sweep expired reassemblies
+                            let now = Instant::now();
+                            self.green_reassemblies.retain(|_, r| {
+                                now.duration_since(r.last_update) < Duration::from_secs(60)
+                            });
+                            if self.green_reassemblies.len() >= MAX_GREEN_REASSEMBLIES {
+                                warn!(
+                                    "too many concurrent Green reassemblies; dropping new session {:?}",
+                                    session
+                                );
+                                continue;
+                            }
+                        }
+
                         let entry = self.green_reassemblies.entry(session).or_insert_with(|| {
                             GreenReassembly {
                                 _source: source,
@@ -749,7 +789,6 @@ impl Driver {
                         });
 
                         entry.last_update = Instant::now();
-                        let end_offset = offset as usize + data.len();
                         if entry.data.len() < end_offset {
                             entry.data.resize(end_offset, 0);
                         }

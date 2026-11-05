@@ -7,6 +7,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
+use axum::http::{HeaderValue, Method, header};
 use axum::routing::{get, post};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -130,10 +132,34 @@ pub fn create_router(state: AppState) -> Router {
     }
     let serve_dir = ServeDir::new(&static_dir).fallback(ServeFile::new(index_file));
 
+    // Restrict CORS origins to localhost / loopback interfaces to prevent
+    // drive-by cross-origin localhost CSRF from third-party websites.
+    let cors = CorsLayer::new()
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::CONTENT_TYPE, header::RANGE, header::AUTHORIZATION])
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(
+            |origin: &HeaderValue, _| {
+                if let Ok(s) = origin.to_str() {
+                    s.starts_with("http://localhost")
+                        || s.starts_with("http://127.0.0.1")
+                        || s.starts_with("http://[::1]")
+                } else {
+                    false
+                }
+            },
+        ));
+
     Router::new()
         .nest("/api/v1", api_routes)
         .fallback_service(serve_dir)
-        .layer(CorsLayer::permissive())
+        .layer(DefaultBodyLimit::max(64 * 1024 * 1024)) // 64 MiB multipart/body limit
+        .layer(cors)
         .with_state(state)
 }
 

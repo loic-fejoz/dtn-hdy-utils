@@ -337,14 +337,22 @@ fn is_safe_ip(ip: std::net::IpAddr) -> bool {
         return false;
     }
     match ip {
-        std::net::IpAddr::V4(v4) => !v4.is_private() && !v4.is_link_local(),
+        std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            // Block 0.0.0.0/8
+            if octets[0] == 0 {
+                return false;
+            }
+            // Block CGNAT / Shared Address Space 100.64.0.0/10 (RFC 6598)
+            if octets[0] == 100 && (octets[1] & 0b1100_0000) == 64 {
+                return false;
+            }
+            !v4.is_private() && !v4.is_link_local() && !v4.is_broadcast()
+        }
         std::net::IpAddr::V6(v6) => {
-            // Check if it's an IPv4-mapped IPv6 address
-            if let Some(v4) = v6.to_ipv4() {
-                return !v4.is_loopback()
-                    && !v4.is_unspecified()
-                    && !v4.is_private()
-                    && !v4.is_link_local();
+            // Check if it's an IPv4-mapped IPv6 address (::ffff:x.x.x.x)
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_safe_ip(std::net::IpAddr::V4(v4));
             }
             let is_link_local = (v6.segments()[0] & 0xffc0) == 0xfe80;
             let is_unique_local = (v6.segments()[0] & 0xfe00) == 0xfc00;

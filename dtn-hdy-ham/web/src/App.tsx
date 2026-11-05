@@ -160,7 +160,7 @@ export function App() {
       const res = await fetch('/api/v1/files/unread');
       if (res.ok) {
         const data = await res.json();
-        setUnreadFilesTotal(data.unread_count || 0);
+        setUnreadFilesTotal(data.unread_count ?? data.unread ?? 0);
       }
     } catch {
       // Retain existing
@@ -249,6 +249,13 @@ export function App() {
 
   return (
     <div class="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
+      <a
+        href="#main-content"
+        class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2 focus:bg-emerald-600 focus:text-white focus:rounded-lg focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-white text-sm font-semibold"
+      >
+        Skip to main content
+      </a>
+
       <Navbar
         activeTab={activeTab}
         onTabChange={navigateToTab}
@@ -260,7 +267,7 @@ export function App() {
         unreadFilesCount={unreadFilesTotal}
       />
 
-      <main class="flex-1">
+      <main id="main-content" class="flex-1" tabIndex={-1}>
         {activeTab === 'config' ? (
           <ConfigView
             config={config}

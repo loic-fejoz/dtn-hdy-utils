@@ -1,5 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
+import { renderMarkdown, escapeHtml } from '../utils/markdown';
 
 export interface ChatMessage {
   id: string;
@@ -77,46 +78,6 @@ function formatMessageTime(isoStr: string | number): string {
 }
 
 // Safely escape HTML characters
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-// Render lightweight Markdown (bold, italic, code, links, newlines) safely
-function renderMarkdown(content: string): string {
-  const safe = escapeHtml(content);
-
-  // Fenced code blocks ```code```
-  let formatted = safe.replace(/```([\s\S]*?)```/g, (_match, p1) => {
-    return `<pre class="my-1.5 p-2 bg-slate-900 text-slate-100 rounded text-xs font-mono overflow-x-auto whitespace-pre-wrap">${p1.trim()}</pre>`;
-  });
-
-  // Inline code `code`
-  formatted = formatted.replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 bg-slate-200 dark:bg-slate-700 rounded text-xs font-mono">$1</code>');
-
-  // Bold **text**
-  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-  // Italic *text* or _text_
-  formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
-
-  // Links https:// or dtn://
-  formatted = formatted.replace(
-    /(https?:\/\/[^\s]+|dtn:\/\/[^\s]+)/g,
-    '<a href="$1" target="_blank" rel="noopener noreferrer" class="underline hover:opacity-80">$1</a>'
-  );
-
-  // Line breaks
-  formatted = formatted.replace(/\n/g, '<br/>');
-
-  return formatted;
-}
-
 export function ChatView({
   stationCallsign,
   stationNodeId = 'dtn://station/',
@@ -257,6 +218,17 @@ export function ChatView({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Escape key closes modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showNewChatModal) {
+        setShowNewChatModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showNewChatModal]);
+
   // Send message
   const handleSendMessage = async (e?: Event) => {
     if (e) e.preventDefault();
@@ -379,6 +351,7 @@ export function ChatView({
               <input
                 type="text"
                 placeholder="Search callsign or EID..."
+                aria-label="Search conversations"
                 value={searchFilter}
                 onInput={(e) => setSearchFilter((e.target as HTMLInputElement).value)}
                 class="w-full pl-9 pr-3 py-1.5 text-sm bg-slate-100 dark:bg-slate-700/60 text-slate-900 dark:text-white rounded-lg border border-transparent focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-800 outline-none transition"
@@ -463,6 +436,7 @@ export function ChatView({
                   {/* Back button for mobile */}
                   <button
                     onClick={() => setSelectedPeer(null)}
+                    aria-label="Back to conversations"
                     class="md:hidden p-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-lg"
                   >
                     ←
@@ -476,7 +450,7 @@ export function ChatView({
                     <h2 class="font-bold text-slate-900 dark:text-white flex items-center space-x-2">
                       <span class="font-mono">{selectedPeer}</span>
                     </h2>
-                    <p class="text-xs font-mono text-slate-400">
+                    <p class="text-xs font-mono text-slate-500 dark:text-slate-400">
                       Destination EID: {selectedPeer}
                     </p>
                   </div>
@@ -486,6 +460,7 @@ export function ChatView({
                   <button
                     onClick={() => fetchMessages(selectedPeer)}
                     title="Reload thread"
+                    aria-label="Reload thread"
                     class="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition"
                   >
                     🔄
@@ -495,7 +470,7 @@ export function ChatView({
 
               {/* Error Alert */}
               {error && (
-                <div class="mx-4 my-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-600 dark:text-red-400">
+                <div role="alert" class="mx-4 my-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-600 dark:text-red-400">
                   {error}
                 </div>
               )}
@@ -572,6 +547,7 @@ export function ChatView({
                       ref={inputRef}
                       rows={2}
                       value={inputText}
+                      aria-label="Message text"
                       placeholder={`Message ${activeTitle}... (Markdown & emojis supported)`}
                       onInput={(e) => setInputText((e.target as HTMLTextAreaElement).value)}
                       onKeyDown={(e) => {
@@ -676,15 +652,21 @@ export function ChatView({
 
       {/* New Chat Modal */}
       {showNewChatModal && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-chat-title"
+          class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+        >
           <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-md w-full border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
-              <h3 class="font-bold text-slate-900 dark:text-white flex items-center space-x-2">
-                <span>✏️</span>
+              <h3 id="new-chat-title" class="font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                <span aria-hidden="true">✏️</span>
                 <span>Start New Chat</span>
               </h3>
               <button
                 onClick={() => setShowNewChatModal(false)}
+                aria-label="Close modal"
                 class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg leading-none"
               >
                 ✕
@@ -693,10 +675,11 @@ export function ChatView({
 
             <div class="p-5 space-y-4">
               <div>
-                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                <label for="new-chat-input" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                   Correspondent Callsign or EID
                 </label>
                 <input
+                  id="new-chat-input"
                   type="text"
                   placeholder="e.g. F4JXQ or dtn://f4jxq/"
                   value={newChatInput}

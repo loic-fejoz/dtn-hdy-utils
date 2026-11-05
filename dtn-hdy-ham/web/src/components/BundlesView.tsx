@@ -1,5 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
+import { renderMarkdown } from '../utils/markdown';
 
 export interface BundleSummary {
   id: string;
@@ -118,6 +119,22 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
     fetchBundles();
   }, []);
 
+  // Escape key closes modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (bundleToDelete) {
+          setBundleToDelete(null);
+        } else if (selectedBundleId) {
+          setSelectedBundleId(null);
+          setBundleDetail(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [bundleToDelete, selectedBundleId]);
+
   // Open inspection drawer / modal
   const handleInspect = async (id: string) => {
     setSelectedBundleId(id);
@@ -214,7 +231,7 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
 
       {/* Action Notification */}
       {actionSuccess && (
-        <div class="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 rounded-lg text-emerald-800 dark:text-emerald-300 text-sm flex items-center justify-between">
+        <div aria-live="polite" class="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 rounded-lg text-emerald-800 dark:text-emerald-300 text-sm flex items-center justify-between">
           <span>✓ {actionSuccess}</span>
           <button
             onClick={() => setActionSuccess(null)}
@@ -227,7 +244,7 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
 
       {/* Global Error */}
       {error && (
-        <div class="p-4 bg-red-50 dark:bg-red-950/60 border border-red-300 dark:border-red-800 rounded-lg text-red-800 dark:text-red-300 text-sm">
+        <div role="alert" class="p-4 bg-red-50 dark:bg-red-950/60 border border-red-300 dark:border-red-800 rounded-lg text-red-800 dark:text-red-300 text-sm">
           ⚠️ {error}
         </div>
       )}
@@ -235,7 +252,7 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
       {/* Search and Filters Bar */}
       <div class="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row gap-3 items-center justify-between">
         <div class="relative w-full sm:w-96">
-          <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+          <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400" aria-hidden="true">
             🔍
           </span>
           <input
@@ -243,13 +260,15 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
             value={searchTerm}
             onInput={(e) => setSearchTerm((e.target as HTMLInputElement).value)}
             placeholder="Search by ID, source or destination EID..."
+            aria-label="Search by ID, source or destination EID"
             class="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
 
         <div class="flex items-center space-x-3 w-full sm:w-auto justify-end">
-          <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Status:</label>
+          <label for="bundle-status-filter" class="text-xs font-medium text-slate-500 dark:text-slate-400">Status:</label>
           <select
+            id="bundle-status-filter"
             value={statusFilter}
             onChange={(e) => setStatusFilter((e.target as HTMLSelectElement).value)}
             class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -387,14 +406,19 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
 
       {/* Inspector Modal */}
       {selectedBundleId && (
-        <div class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bundle-inspector-title"
+          class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+        >
           <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in duration-150">
             {/* Modal Header */}
             <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between bg-slate-50 dark:bg-slate-900/50">
               <div class="flex items-center space-x-3">
-                <span class="text-2xl">📦</span>
+                <span class="text-2xl" aria-hidden="true">📦</span>
                 <div>
-                  <h3 class="text-lg font-bold text-slate-900 dark:text-white">Bundle Inspector</h3>
+                  <h3 id="bundle-inspector-title" class="text-lg font-bold text-slate-900 dark:text-white">Bundle Inspector</h3>
                   <div class="text-xs font-mono text-slate-500 dark:text-slate-400 truncate max-w-md">
                     {selectedBundleId}
                   </div>
@@ -405,6 +429,7 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                   setSelectedBundleId(null);
                   setBundleDetail(null);
                 }}
+                aria-label="Close modal"
                 class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xl font-bold p-1 rounded-lg"
               >
                 ✕
@@ -493,9 +518,10 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                       </div>
 
                       {/* View Switcher */}
-                      <div class="flex items-center space-x-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <div class="flex items-center space-x-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-700" role="group" aria-label="Payload view mode">
                         <button
                           onClick={() => setDetailViewMode('preview')}
+                          aria-pressed={detailViewMode === 'preview'}
                           class={`px-3 py-1 text-xs font-medium rounded transition-colors ${
                             detailViewMode === 'preview'
                               ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
@@ -506,6 +532,7 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                         </button>
                         <button
                           onClick={() => setDetailViewMode('hex')}
+                          aria-pressed={detailViewMode === 'hex'}
                           class={`px-3 py-1 text-xs font-medium rounded transition-colors ${
                             detailViewMode === 'hex'
                               ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
@@ -517,6 +544,7 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                         {!bundleDetail.is_binary && (
                           <button
                             onClick={() => setDetailViewMode('raw')}
+                            aria-pressed={detailViewMode === 'raw'}
                             class={`px-3 py-1 text-xs font-medium rounded transition-colors ${
                               detailViewMode === 'raw'
                                 ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
@@ -596,9 +624,18 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                                 📋 Copy Text
                               </button>
                             </div>
-                            <pre class="font-sans text-sm text-slate-900 dark:text-slate-200 whitespace-pre-wrap break-words bg-slate-100 dark:bg-slate-950 p-4 rounded-lg overflow-y-auto max-h-96">
-                              {bundleDetail.payload_preview}
-                            </pre>
+                            {bundleDetail.mime_type === 'text/markdown' ? (
+                              <div
+                                class="prose prose-sm dark:prose-invert max-w-none p-4 bg-slate-100 dark:bg-slate-950 rounded-lg overflow-y-auto max-h-96"
+                                dangerouslySetInnerHTML={{
+                                  __html: renderMarkdown(bundleDetail.payload_preview || '', { allowImages: true }),
+                                }}
+                              />
+                            ) : (
+                              <pre class="font-sans text-sm text-slate-900 dark:text-slate-200 whitespace-pre-wrap break-words bg-slate-100 dark:bg-slate-950 p-4 rounded-lg overflow-y-auto max-h-96">
+                                {bundleDetail.payload_preview}
+                              </pre>
+                            )}
                           </div>
                         ) : (
                           <div class="space-y-2">
@@ -687,11 +724,16 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
 
       {/* Delete Confirmation Modal */}
       {bundleToDelete && (
-        <div class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-bundle-title"
+          class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+        >
           <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 max-w-md w-full p-6 space-y-4 animate-in fade-in duration-150">
             <div class="flex items-center space-x-3 text-red-600 dark:text-red-400">
-              <span class="text-3xl">⚠️</span>
-              <h3 class="text-lg font-bold text-slate-900 dark:text-white">Delete Bundle?</h3>
+              <span class="text-3xl" aria-hidden="true">⚠️</span>
+              <h3 id="delete-bundle-title" class="text-lg font-bold text-slate-900 dark:text-white">Delete Bundle?</h3>
             </div>
 
             <p class="text-sm text-slate-600 dark:text-slate-300">

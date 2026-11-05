@@ -324,17 +324,18 @@ export function SendBundleView({
         <form onSubmit={handleSubmit} class="p-6 space-y-6">
           {/* Sender / Source EID (From) */}
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+            <label for="send-source-eid" class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
               Sender / Source Endpoint ID (From)
             </label>
             <input
+              id="send-source-eid"
               type="text"
               value={source}
               onInput={(e) => setSource((e.target as HTMLInputElement).value)}
               placeholder={defaultSource || 'dtn://<callsign>/files'}
               class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
             />
-            <p class="mt-1.5 text-xs text-slate-400">
+            <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
               The transmitting node or service endpoint. Automatically defaults to station files service:{' '}
               <span class="font-mono">{defaultSource || 'dtn://<callsign>/files'}</span>
             </p>
@@ -342,10 +343,11 @@ export function SendBundleView({
 
           {/* Destinator / Destination EID (To) */}
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+            <label for="send-dest-eid" class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
               Destinator / Destination Endpoint ID (To) <span class="text-emerald-500">*</span>
             </label>
             <input
+              id="send-dest-eid"
               type="text"
               value={destination}
               onInput={(e) => setDestination((e.target as HTMLInputElement).value)}
@@ -353,24 +355,25 @@ export function SendBundleView({
               required
               class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
             />
-            <p class="mt-1.5 text-xs text-slate-400">
+            <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
               Target DTN node and optional service endpoint. Trailing slash is automatically normalized.
             </p>
           </div>
 
           {/* Bundle Lifetime */}
           <div>
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+            <label for="send-lifetime-input" class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
               Bundle Lifetime (Seconds)
             </label>
             <input
+              id="send-lifetime-input"
               type="number"
               min="10"
               value={lifetime}
               onInput={(e) => setLifetime((e.target as HTMLInputElement).value)}
               class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
             />
-            <p class="mt-1.5 text-xs text-slate-400">
+            <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
               Default 3600 seconds (1 hour store-and-forward retention).
             </p>
           </div>
@@ -380,10 +383,11 @@ export function SendBundleView({
             <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
               Payload Type
             </label>
-            <div class="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+            <div class="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700" role="group" aria-label="Payload Type">
               <button
                 type="button"
                 onClick={() => setMode('text')}
+                aria-pressed={mode === 'text'}
                 class={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
                   mode === 'text'
                     ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
@@ -395,6 +399,7 @@ export function SendBundleView({
               <button
                 type="button"
                 onClick={() => setMode('file')}
+                aria-pressed={mode === 'file'}
                 class={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
                   mode === 'file'
                     ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
@@ -406,6 +411,7 @@ export function SendBundleView({
               <button
                 type="button"
                 onClick={() => setMode('voice')}
+                aria-pressed={mode === 'voice'}
                 class={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
                   mode === 'voice'
                     ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
@@ -420,10 +426,11 @@ export function SendBundleView({
           {/* Payload Content Area */}
           {mode === 'text' ? (
             <div>
-              <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+              <label for="send-text-payload" class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
                 Message Content
               </label>
               <textarea
+                id="send-text-payload"
                 rows={5}
                 value={textPayload}
                 onInput={(e) => setTextPayload((e.target as HTMLTextAreaElement).value)}

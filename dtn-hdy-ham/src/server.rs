@@ -539,6 +539,10 @@ impl HamServer {
                 let cancel = self.tasks.cancel_token().clone();
                 hardy_async::spawn!(self.tasks, "tcpcl_peer_connector", async move {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let mut retry_delay = std::time::Duration::from_secs(1);
+                    const MAX_STARTUP_RETRIES: usize = 5;
+                    let mut attempts = 0;
+
                     loop {
                         tokio::select! {
                             _ = cancel.cancelled() => break,
@@ -555,16 +559,28 @@ impl HamServer {
                                         break;
                                     }
                                     Err(e) => {
+                                        attempts += 1;
                                         cla_manager
                                             .set_peer_status(
                                                 peer_addr,
                                                 crate::cla_manager::PeerConnectionStatus::Disconnected,
                                             )
                                             .await;
+                                        if attempts >= MAX_STARTUP_RETRIES {
+                                            tracing::info!(
+                                                "TCPCL startup dialing to {} reached max attempts ({}); deferring to coordinator schedule.",
+                                                peer_addr,
+                                                attempts
+                                            );
+                                            break;
+                                        }
                                         tracing::debug!(
-                                            "TCPCL connect to {} failed ({}), retrying in 1s...",
+                                            "TCPCL connect to {} failed ({}), retrying in {:?} (attempt {}/{})...",
                                             peer_addr,
-                                            e
+                                            e,
+                                            retry_delay,
+                                            attempts,
+                                            MAX_STARTUP_RETRIES
                                         );
                                     }
                                 }
@@ -572,7 +588,9 @@ impl HamServer {
                         }
                         tokio::select! {
                             _ = cancel.cancelled() => break,
-                            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                            _ = tokio::time::sleep(retry_delay) => {
+                                retry_delay = (retry_delay * 2).min(std::time::Duration::from_secs(15));
+                            }
                         }
                     }
                 });

@@ -1,5 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
+import { renderMarkdown } from '../utils/markdown';
 
 export interface FileBundleRecord {
   id: string;
@@ -65,62 +66,6 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-}
-
-// Render rich Markdown including Data-URI images, code, and emojis
-function renderMarkdownWithDataUris(content: string): string {
-  // First, extract images (both data: and http urls) before escaping text
-  const images: { placeholder: string; tag: string }[] = [];
-  let counter = 0;
-
-  // Replace markdown images ![alt](url)
-  const textWithImagePlaceholders = content.replace(/!\[(.*?)\]\((data:image\/[^;]+;base64,[^)]+|https?:\/\/[^)]+)\)/g, (_match, alt, url) => {
-    const placeholder = `@@IMGTOKEN${counter++}@@`;
-    const safeAlt = escapeHtml(alt || 'Image');
-    const tag = `<div class="my-3"><img src="${url}" alt="${safeAlt}" class="max-h-96 rounded-xl shadow border border-slate-200 dark:border-slate-700 object-contain mx-auto" /><p class="text-center text-xs text-slate-400 mt-1">${safeAlt}</p></div>`;
-    images.push({ placeholder, tag });
-    return placeholder;
-  });
-
-  // Escape the rest of HTML
-  let formatted = escapeHtml(textWithImagePlaceholders);
-
-  // Fenced code blocks ```code```
-  formatted = formatted.replace(/```([\s\S]*?)```/g, (_match, p1) => {
-    return `<pre class="my-2 p-3 bg-slate-900 text-slate-100 rounded-xl text-xs font-mono overflow-x-auto whitespace-pre-wrap">${p1.trim()}</pre>`;
-  });
-
-  // Inline code `code`
-  formatted = formatted.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded text-xs font-mono">$1</code>');
-
-  // Headings
-  formatted = formatted.replace(/^### (.*$)/gm, '<h3 class="text-base font-bold text-slate-900 dark:text-white mt-3 mb-1">$1</h3>');
-  formatted = formatted.replace(/^## (.*$)/gm, '<h2 class="text-lg font-bold text-emerald-600 dark:text-emerald-400 mt-4 mb-2">$1</h2>');
-  formatted = formatted.replace(/^# (.*$)/gm, '<h1 class="text-xl font-extrabold text-slate-900 dark:text-white mt-4 mb-2 pb-1 border-b border-slate-200 dark:border-slate-700">$1</h1>');
-
-  // Bold & Italic
-  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
-
-  // Links
-  formatted = formatted.replace(
-    /(https?:\/\/[^\s]+|dtn:\/\/[^\s]+)/g,
-    '<a href="$1" target="_blank" rel="noopener noreferrer" class="text-emerald-600 dark:text-emerald-400 underline hover:opacity-85">$1</a>'
-  );
-
-  // Bullet lists
-  formatted = formatted.replace(/^[-*+] (.*$)/gm, '<li class="ml-4 list-disc">$1</li>');
-
-  // Line breaks
-  formatted = formatted.replace(/\n/g, '<br/>');
-
-  // Reinsert images
-  for (const item of images) {
-    formatted = formatted.replaceAll(item.placeholder, item.tag);
-  }
-
-  return formatted;
 }
 
 export function FilesView({
@@ -458,7 +403,7 @@ export function FilesView({
               <div
                 class="prose prose-sm dark:prose-invert max-w-none p-4 bg-slate-50/50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-800"
                 dangerouslySetInnerHTML={{
-                  __html: renderMarkdownWithDataUris(detailData.payload_preview),
+                  __html: renderMarkdown(detailData.payload_preview, { allowImages: true }),
                 }}
               />
             ) : (
@@ -513,6 +458,7 @@ export function FilesView({
             <input
               type="text"
               placeholder="Search by source EID, MIME type or bundle ID..."
+              aria-label="Search by source EID, MIME type or bundle ID"
               value={searchFilter}
               onInput={(e) => setSearchFilter((e.target as HTMLInputElement).value)}
               class="w-full pl-10 pr-4 py-2 text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl border border-slate-200 dark:border-slate-700 focus:border-emerald-500 outline-none shadow-sm transition"
@@ -521,7 +467,7 @@ export function FilesView({
 
           {/* Error Banner */}
           {error && (
-            <div class="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-600 dark:text-red-400">
+            <div role="alert" class="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-600 dark:text-red-400">
               {error}
             </div>
           )}
@@ -544,14 +490,22 @@ export function FilesView({
               {filtered.map((b) => (
                 <div
                   key={b.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     if (onSelectBundle) onSelectBundle(b.id);
                   }}
-                  class="cursor-pointer bg-white dark:bg-slate-800 hover:border-emerald-500/60 dark:hover:border-emerald-500/60 rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 dark:border-slate-700 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      if (onSelectBundle) onSelectBundle(b.id);
+                    }
+                  }}
+                  class="cursor-pointer bg-white dark:bg-slate-800 hover:border-emerald-500/60 dark:hover:border-emerald-500/60 rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 dark:border-slate-700 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 group focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   <div class="flex items-start space-x-3 min-w-0">
                     {/* Icon */}
-                    <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 flex-shrink-0 flex items-center justify-center text-lg">
+                    <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 flex-shrink-0 flex items-center justify-center text-lg" aria-hidden="true">
                       {b.mime_type.startsWith('image/')
                         ? '🖼️'
                         : b.mime_type.startsWith('audio/')
@@ -580,7 +534,7 @@ export function FilesView({
                         )}
                       </div>
 
-                      <div class="flex items-center space-x-3 text-xs text-slate-400">
+                      <div class="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400">
                         <span>{formatDate(b.created_at)}</span>
                         <span>·</span>
                         <span>{formatBytes(b.size)}</span>
@@ -603,8 +557,9 @@ export function FilesView({
                           : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400'
                       }`}
                       title={b.is_sticky ? 'Sticky (protected)' : 'Mark sticky'}
+                      aria-label={b.is_sticky ? 'Unpin file' : 'Pin file'}
                     >
-                      📌
+                      <span aria-hidden="true">📌</span>
                     </button>
 
                     {/* Download */}
@@ -614,8 +569,9 @@ export function FilesView({
                       onClick={(e) => e.stopPropagation()}
                       class="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition"
                       title="Download payload"
+                      aria-label="Download payload"
                     >
-                      💾
+                      <span aria-hidden="true">💾</span>
                     </a>
 
                     {/* Delete */}
@@ -623,8 +579,9 @@ export function FilesView({
                       onClick={(e) => handleDelete(b.id, e)}
                       class="p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition"
                       title="Delete bundle"
+                      aria-label="Delete bundle"
                     >
-                      🗑️
+                      <span aria-hidden="true">🗑️</span>
                     </button>
                   </div>
                 </div>

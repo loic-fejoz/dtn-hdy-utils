@@ -24,7 +24,6 @@ pub fn serve_payload_with_range(
     req_headers: &HeaderMap,
 ) -> Response {
     let total_len = bytes.len();
-    let disposition_type = if is_download { "attachment" } else { "inline" };
 
     // Dynamically refine Ogg Opus MIME type if OpusHead signature is detected
     let mut mime_type = raw_mime.to_string();
@@ -40,6 +39,34 @@ pub fn serve_payload_with_range(
         }
     }
 
+    // Determine safe disposition type.
+    // Dangerous web types like HTML or SVG must NEVER be rendered inline without sandbox.
+    let is_safe_inline_mime = mime_type.starts_with("image/png")
+        || mime_type.starts_with("image/jpeg")
+        || mime_type.starts_with("image/gif")
+        || mime_type.starts_with("image/webp")
+        || mime_type.starts_with("audio/")
+        || mime_type.starts_with("video/")
+        || mime_type.starts_with("text/plain")
+        || mime_type.starts_with("text/markdown");
+
+    let disposition_type = if is_download || !is_safe_inline_mime {
+        "attachment"
+    } else {
+        "inline"
+    };
+
+    // Sanitize filename against CRLF, quotes, backslashes for Content-Disposition header
+    let safe_filename: String = filename
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\r' | '\n' | '\\'))
+        .collect();
+    let safe_filename = if safe_filename.is_empty() {
+        "payload.bin".to_string()
+    } else {
+        safe_filename
+    };
+
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
@@ -48,10 +75,18 @@ pub fn serve_payload_with_range(
     );
     headers.insert(
         header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&format!("{disposition_type}; filename=\"{filename}\""))
+        HeaderValue::from_str(&format!("{disposition_type}; filename=\"{safe_filename}\""))
             .unwrap_or_else(|_| HeaderValue::from_static("inline")),
     );
     headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    headers.insert(
+        header::HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::HeaderName::from_static("content-security-policy"),
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
 
     // Handle HTTP Range header (e.g., bytes=0-1023, bytes=1024-, bytes=-500)
     if let Some(range_header) = req_headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {

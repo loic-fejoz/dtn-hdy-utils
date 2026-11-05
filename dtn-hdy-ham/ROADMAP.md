@@ -159,10 +159,10 @@ flowchart TD
 
 ---
 
-### Phase 3ter: Dynamic Static Routing & Out-of-the-Box TCPCLv4 Peering (Completed)
-> **Goal**: Enable interactive adding and deleting of static routes via the web console with immediate RIB application, and provide a turnkey, zero-configuration experience for pure TCPCLv4 amateur radio networking with gateway peering (e.g. F4JXQ) and scheduled contact windows (ADR 0014).
+### Phase 3ter: Dynamic Static Routing, TCPCLv4 Peering, Security (OWASP Top 10), Code Quality & Accessibility
+> **Goal**: Enable interactive adding and deleting of static routes via the web console with immediate RIB application, provide a turnkey experience for pure TCPCLv4 amateur radio networking with gateway peering (e.g. F4JXQ) and scheduled contact windows (ADR 0014), and resolve all OWASP Top 10 security vulnerabilities (excluding AuthN/AuthZ), runtime/performance bugs, and accessibility (a11y) gaps identified during the repository-wide audit.
 
-#### Deliverables:
+#### Deliverables (Routing & TCPCLv4 Peering):
 1. [x] **Dynamic Route Manager & Immediate BPA Application (`RouteManager`)**:
    * Implement a persistent `HamRoutingAgent` that retains Hardy BPA's `RoutingSink` during daemon execution.
    * Add REST endpoints (`/api/v1/routes`):
@@ -189,6 +189,85 @@ flowchart TD
    * Instant reactivity: route creation takes effect immediately in the routing table and autocomplete lists.
 6. [x] **Enhanced Peer Suggestions**:
    * Expand chat and send bundle autocomplete candidates to include targets derived from active static routes (e.g. `dtn://f4jxq-9/chat` and `dtn://f4jxq-9/files`).
+
+#### Deliverables (OWASP Top 10 Security Remediation — Excluding AuthN/AuthZ):
+7. [x] **[OWASP A03:2021 – Injection] Fix Stored XSS in Markdown Renderers (`FilesView.tsx`, `ChatView.tsx`, `BundlesView.tsx`)**:
+   * **Root Cause**:
+     * In `dtn-hdy-ham/web/src/components/FilesView.tsx` (`renderMarkdownWithDataUris`, lines 71–124, injected via `dangerouslySetInnerHTML` at line 460), Markdown images `![alt](url)` were extracted into `images` *before* `escapeHtml(textWithImagePlaceholders)` was called, and at line 117 `img.url` was interpolated directly into `<img src="${img.url}" ...>` without escaping `"` or `<`. A bundle payload containing `![x](data:image/png;base64,x"onerror="alert(1))` or `![x](https://x/a"onload="alert(1))` could break out of the `src` attribute and execute arbitrary JavaScript.
+     * In both `dtn-hdy-ham/web/src/components/ChatView.tsx` (`renderMarkdown`, line 110, injected via `dangerouslySetInnerHTML` at line 537) and `FilesView.tsx` (line 108), the URL linkifier regex was running without full attribute escaping.
+   * **Remediation**:
+     * Created `dtn-hdy-ham/web/src/utils/markdown.ts` with strict URL scheme allowlisting for data-uri images (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/avif`) and http/https images, plus full escaping of `alt`, `src`, and `href` attributes.
+     * Shared safe renderer across `ChatView.tsx`, `FilesView.tsx`, and `BundlesView.tsx`.
+8. [x] **[OWASP A03/A05:2021 – Injection & Security Misconfiguration] Harden Raw Bundle Payload Serving Against Stored XSS & Header Injection (`dtn-hdy-ham/src/web/routes/mod.rs`)**:
+   * **Root Cause**:
+     * In `dtn-hdy-ham/src/web/routes/mod.rs` (`serve_payload_with_range`, lines 19–124), used by `GET /api/v1/bundles/payload` and `GET /api/v1/files/{id}/payload`, when `download` was `false` (default), responses were served with `Content-Disposition: inline; filename="{filename}"` without `X-Content-Type-Options: nosniff` or `Content-Security-Policy`. Dangerous web types like HTML or SVG opened directly in a browser could execute scripts in the web console's origin. Additionally, `filename` was interpolated without stripping `"`, `\r`, or `\n`.
+   * **Remediation**:
+     * Sanitized `filename` against quotes and CRLF characters.
+     * Attached `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox` to all payload responses.
+     * Enforced `disposition_type = "attachment"` for non-safe media types (HTML, SVG, unknown binaries), keeping inline only for verified safe media (safe images, audio, video, plain text, and markdown).
+9. [x] **[OWASP A01:2021 – Broken Access Control / Path Traversal] Sanitize `storage_name` Before Joining onto `payload_dir` (`dtn-hdy-ham/src/bundle_inspector.rs`)**:
+   * **Root Cause**:
+     * In `dtn-hdy-ham/src/bundle_inspector.rs`, `get_bundle_payload` and `delete_bundle_from_storage` read `storage_name` from the `bundles` SQLite JSON metadata and passed it directly to `payload_dir.join(name)`.
+   * **Remediation**:
+     * Implemented `safe_payload_path` verifying that path components are strictly relative and normal (`std::path::Component::Normal`), explicitly disallowing `..`, `/`, `\`, and absolute paths before file read or deletion.
+10. [x] **[OWASP A03:2021 – Injection] Prevent CRLF / Command Injection on Mercury TNC Control Socket & Config YAML (`mercury-cla/src/driver.rs`, `dtn-hdy-ham/src/wizard.rs`)**:
+    * **Root Cause**:
+      * In `mercury-cla/src/driver.rs`, callsigns and bandwidth strings were formatted directly into TNC control commands without character validation.
+      * In `dtn-hdy-ham/src/wizard.rs`, `data_dir` and `web_address` were interpolated into a raw YAML string template without escaping.
+    * **Remediation**:
+      * Validated callsigns in `mercury-cla` against an alphanumeric and hyphen allowlist (`[A-Za-z0-9-]`) before transmission.
+      * Escaped backslashes and double quotes in `wizard.rs` before generating YAML configs.
+11. [x] **[OWASP A04/A05:2021 – Unbounded Allocation / DoS] Enforce Frame, Segment, and Body Size Caps in CLAs and Web Server (`ltp-cla`, `mercury-cla`, `dtn-hdy-ham`)**:
+    * **Root Cause**:
+      * **LTP Green Segment OOM**: In `ltp-cla/src/driver.rs`, `entry.data.resize(end_offset, 0)` allowed unbounded allocation from untrusted SDNV offsets.
+      * **Mercury Data Frame OOM**: In `mercury-cla/src/driver.rs`, `data_read_loop` allocated `vec![0u8; length]` directly from a 4-byte header up to 4 GiB.
+      * **Mercury Control Line Buffer OOM**: Accumulation without limit on missing newline in `control_read_loop`.
+      * **Web Multipart Upload & CORS**: `CorsLayer::permissive()` allowed cross-origin execution from external origins.
+    * **Remediation**:
+      * In `ltp-cla`, capped green bundle reassembly at 16 MiB, added integer overflow checks, and limited concurrent green sessions to 64.
+      * In `mercury-cla`, capped data frames to 16 MiB max and control line buffer to 4096 bytes.
+      * In `dtn-hdy-ham/src/web/mod.rs`, restricted CORS origins strictly to localhost / loopback interfaces and set `DefaultBodyLimit::max(64 MiB)`.
+12. [x] **[OWASP A10:2021 – SSRF] Fix DNS Rebinding TOCTOU and IPv6-Mapped IPv4 Check in `dtnbasket` (`src/bin/dtnbasket.rs`)**:
+    * **Root Cause**:
+      * `is_safe_ip` did not block `0.0.0.0/8`, CGNAT `100.64.0.0/10`, and used `to_ipv4()` rather than `to_ipv4_mapped()`.
+    * **Remediation**:
+      * Updated `is_safe_ip` with `to_ipv4_mapped()`, blocking `0.0.0.0/8`, `100.64.0.0/10` (RFC 6598), loopbacks, link-locals, and private addresses.
+
+#### Deliverables (Code Quality, Bugs & Performance Remediation):
+13. [x] **[Bug] Fix Unread Files Badge Key Mismatch Between Backend and Frontend (`dtn-hdy-ham/src/web/routes/files.rs` & `dtn-hdy-ham/web/src/App.tsx`)**:
+    * **Remediation**:
+      * Returned `{ "unread": count, "unread_count": count }` in `dtn-hdy-ham/src/web/routes/files.rs` and updated `App.tsx` with fallback `data.unread_count ?? data.unread ?? 0`.
+14. [x] **[Bug] Render Formatted Markdown in `BundlesView.tsx` Inspector Modal (`dtn-hdy-ham/web/src/components/BundlesView.tsx`)**:
+    * **Remediation**:
+      * Used the shared `renderMarkdown` utility in `BundlesView.tsx` with image support when inspecting `text/markdown` payloads.
+15. [x] **[Performance & Async Correctness] Offload Synchronous `ffmpeg` Subprocess and Cap File/SQLite Previews (`dtn-hdy-ham/src/web/routes/bundles.rs`, `files.rs`, `bundle_inspector.rs`)**:
+    * **Remediation**:
+      * Offloaded `maybe_remux_webm_to_ogg` to `tokio::task::spawn_blocking`.
+      * Capped text previews to 16 KiB and hex dumps to 4 KiB in `bundle_inspector.rs`.
+      * Capped file payload previews to 64 KiB in `files.rs`.
+16. [x] **[Bug / Reliability] Keep TCPCLv4 Startup Connector & Status Synchronized Across Disconnections (`dtn-hdy-ham/src/server.rs`)**:
+    * **Remediation**:
+      * Replaced the infinite 1s loop with exponential backoff up to 5 attempts before cleanly yielding to the `ContactCoordinator` schedule, preventing link flapping.
+
+#### Deliverables (Accessibility / a11y Quick Wins — `dtn-hdy-ham/web`):
+17. [x] **[a11y] Landmarks, Skip Link & Navigation Semantics (`App.tsx`, `Navbar.tsx`)**:
+    * **Remediation**:
+      * Added visible focus skip link (`#main-content`) in `App.tsx`.
+      * Added `aria-label="Main navigation"` to `<nav>`, `aria-current="page"` on active tab, `aria-hidden="true"` on decorative emojis, and `aria-label` / `aria-pressed` on the theme toggle button.
+18. [x] **[a11y] Accessible Modals (`role="dialog"`, `aria-modal`, `Escape` Handler) (`ChatView.tsx`, `BundlesView.tsx`)**:
+    * **Remediation**:
+      * Added `role="dialog"`, `aria-modal="true"`, and `aria-labelledby` on all modal dialogs.
+      * Added `Escape` key event listeners to close active modals.
+      * Added `aria-label="Close modal"` to close buttons.
+19. [x] **[a11y] Form Labels, Keyboard-Interactive Cards & Icon-Only Button Labels (`ConfigView.tsx`, `ChatView.tsx`, `FilesView.tsx`, `BundlesView.tsx`, `SendBundleView.tsx`)**:
+    * **Remediation**:
+      * Associated `for`/`id` labels with inputs and selects across configuration, send bundle, chat, and files views.
+      * Made file cards keyboard-interactive with `role="button"`, `tabIndex={0}`, and `Enter`/`Space` handlers.
+      * Added `aria-label` on all icon-only buttons (copy, reload, download, delete, pin, back).
+20. [x] **[a11y] Live Regions (`role="alert"`, `aria-live`) & WCAG AA Contrast Adjustments**:
+    * **Remediation**:
+      * Added `role="alert"` on error banners and `aria-live="polite"` on transient toast notifications.
+      * Upgraded secondary text contrast from `text-slate-400` to `text-slate-500 dark:text-slate-400` to meet WCAG AA standards.
 
 ---
 
