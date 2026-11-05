@@ -196,9 +196,17 @@ test.describe('Interactive Chat Service & Messenger', () => {
     await expect(lifetimeInput).toBeVisible();
     await expect(lifetimeInput).toHaveValue('3600');
 
-    // Test clicking preset '15m' updates value to 900
-    await page.locator('button', { hasText: '15m' }).click();
-    await expect(lifetimeInput).toHaveValue('900');
+    // Verify 15m and 30m presets were removed
+    await expect(page.locator('button', { hasText: '15m' })).not.toBeVisible();
+    await expect(page.locator('button', { hasText: '30m' })).not.toBeVisible();
+
+    // Test clicking preset '72h' updates value to 259200
+    await page.locator('button', { hasText: '72h' }).click();
+    await expect(lifetimeInput).toHaveValue('259200');
+
+    // Test clicking preset '1 semaine' updates value to 604800
+    await page.locator('button', { hasText: '1 semaine' }).click();
+    await expect(lifetimeInput).toHaveValue('604800');
 
     // Switch back to '1h' preset (3600s)
     await page.locator('button', { hasText: '1h' }).click();

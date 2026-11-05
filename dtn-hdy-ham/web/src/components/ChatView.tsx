@@ -614,11 +614,11 @@ export function ChatView({
                     {/* Quick duration presets */}
                     <div class="flex items-center space-x-1 ml-1">
                       {[
-                        { label: '15m', secs: 900 },
-                        { label: '30m', secs: 1800 },
                         { label: '1h', secs: 3600 },
                         { label: '6h', secs: 21600 },
                         { label: '24h', secs: 86400 },
+                        { label: '72h', secs: 259200 },
+                        { label: '1 semaine', secs: 604800 },
                       ].map((p) => {
                         const isActive = lifetime === p.secs.toString();
                         return (

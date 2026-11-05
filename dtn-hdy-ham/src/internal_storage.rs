@@ -285,18 +285,6 @@ impl InternalStorage {
             INSERT OR IGNORE INTO chat_conversations (peer, created_at)
             SELECT DISTINCT conversation_peer, created_at FROM chat_messages;
 
-            -- Migration: convert DTN BPv7 epoch (relative to 2000-01-01) timestamps to Unix epoch (1970-01-01)
-            -- 946684800000 ms is the exact offset between 1970-01-01 and 2000-01-01.
-            UPDATE chat_messages
-            SET timestamp = timestamp + 946684800000,
-                expiry_timestamp = expiry_timestamp + 946684800000
-            WHERE timestamp > 0 AND timestamp < 1000000000000;
-
-            -- Migration: fix legacy outbound chat messages that had 24h (86400s) lifetime instead of 1h (3600s)
-            UPDATE chat_messages
-            SET expiry_timestamp = timestamp + 3600000
-            WHERE is_sticky = 0 AND (expiry_timestamp - timestamp) > 3600000;
-
             CREATE TABLE IF NOT EXISTS files_bundles (
                 id TEXT PRIMARY KEY,
                 source_eid TEXT NOT NULL,
@@ -312,15 +300,36 @@ impl InternalStorage {
                 created_at TEXT NOT NULL
             );
 
-            UPDATE files_bundles
-            SET creation_timestamp = creation_timestamp + 946684800000,
-                expiry_timestamp = expiry_timestamp + 946684800000
-            WHERE creation_timestamp > 0 AND creation_timestamp < 1000000000000;
-
             CREATE INDEX IF NOT EXISTS idx_files_created ON files_bundles(creation_timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_files_expiry ON files_bundles(is_sticky, expiry_timestamp);
             "#,
         )?;
+
+        let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if user_version < 1 {
+            conn.execute_batch(
+                r#"
+                -- Migration: convert DTN BPv7 epoch (relative to 2000-01-01) timestamps to Unix epoch (1970-01-01)
+                -- 946684800000 ms is the exact offset between 1970-01-01 and 2000-01-01.
+                UPDATE chat_messages
+                SET timestamp = timestamp + 946684800000,
+                    expiry_timestamp = expiry_timestamp + 946684800000
+                WHERE timestamp > 0 AND timestamp < 1000000000000;
+
+                -- Migration: fix legacy outbound chat messages that had 24h (86400s) lifetime instead of 1h (3600s)
+                UPDATE chat_messages
+                SET expiry_timestamp = timestamp + 3600000
+                WHERE is_sticky = 0 AND (expiry_timestamp - timestamp) > 3600000;
+
+                UPDATE files_bundles
+                SET creation_timestamp = creation_timestamp + 946684800000,
+                    expiry_timestamp = expiry_timestamp + 946684800000
+                WHERE creation_timestamp > 0 AND creation_timestamp < 1000000000000;
+
+                PRAGMA user_version = 1;
+                "#,
+            )?;
+        }
         Ok(())
     }
 
@@ -1124,6 +1133,7 @@ mod tests {
         // Re-run init_tables() to simulate server reboot / migration
         {
             let conn = storage.conn.lock().unwrap();
+            conn.execute("PRAGMA user_version = 0", []).unwrap();
             InternalStorage::init_tables(&conn).unwrap();
         }
 
@@ -1200,9 +1210,10 @@ mod tests {
         storage.insert_chat_message(&outbound_msg).unwrap();
         storage.insert_chat_message(&sticky_msg).unwrap();
 
-        // Run migration via init_tables
+        // Run migration via init_tables with user_version = 0
         {
             let conn = storage.conn.lock().unwrap();
+            conn.execute("PRAGMA user_version = 0", []).unwrap();
             InternalStorage::init_tables(&conn).unwrap();
         }
 
@@ -1228,5 +1239,43 @@ mod tests {
             .unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, "outbound-sticky");
+
+        // Now test that modern messages with 72h or 1 week (604800s) lifetime
+        // are PRESERVED and NOT clamped on subsequent server restarts (user_version >= 1)
+        let week_secs = 604_800_i64; // 1 week
+        let week_msg = ChatMessage {
+            id: "outbound-1week".to_string(),
+            conversation_peer: "dtn://stata/chat".to_string(),
+            sender_eid: "dtn://station/chat".to_string(),
+            recipient_eid: "dtn://stata/chat".to_string(),
+            content: "Message for the whole week".to_string(),
+            direction: "outbound".to_string(),
+            status: "sent".to_string(),
+            is_read: true,
+            is_sticky: false,
+            timestamp: now_ms,
+            expiry_timestamp: now_ms + (week_secs * 1000),
+            created_at: "2026-11-05T08:00:00Z".to_string(),
+        };
+        storage.insert_chat_message(&week_msg).unwrap();
+
+        // Server restarts and re-runs init_tables (user_version is already 1)
+        {
+            let conn = storage.conn.lock().unwrap();
+            InternalStorage::init_tables(&conn).unwrap();
+        }
+
+        let week_fetched = storage
+            .get_conversation_messages("dtn://stata/chat")
+            .unwrap();
+        let week_found = week_fetched
+            .iter()
+            .find(|m| m.id == "outbound-1week")
+            .unwrap();
+        assert_eq!(
+            week_found.expiry_timestamp,
+            now_ms + (week_secs * 1000),
+            "1-week message expiry must remain unchanged across server restarts"
+        );
     }
 }
