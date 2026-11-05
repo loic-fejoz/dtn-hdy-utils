@@ -23,6 +23,8 @@ export interface FileDetailResponse {
 }
 
 interface FilesViewProps {
+  stationNodeId?: string;
+  stationCallsign?: string;
   selectedBundleId?: string | null;
   onSelectBundle?: (id: string | null) => void;
   onReply?: (sourceEid: string) => void;
@@ -122,11 +124,14 @@ function renderMarkdownWithDataUris(content: string): string {
 }
 
 export function FilesView({
+  stationNodeId = 'dtn://station/',
+  stationCallsign,
   selectedBundleId,
   onSelectBundle,
   onReply,
   onUnreadChange,
 }: FilesViewProps) {
+  const filesEndpoint = `${(stationNodeId || (stationCallsign ? `dtn://${stationCallsign.toLowerCase()}/` : 'dtn://station/')).replace(/\/+$/, '')}/files`;
   const [bundles, setBundles] = useState<FileBundleRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -485,7 +490,7 @@ export function FilesView({
               <p class="text-sm text-slate-500 dark:text-slate-400">
                 Inbox for files and documents delivered to endpoint{' '}
                 <code class="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 font-mono text-xs text-emerald-700 dark:text-emerald-300">
-                  dtn://&lt;station&gt;/files
+                  {filesEndpoint}
                 </code>
               </p>
             </div>

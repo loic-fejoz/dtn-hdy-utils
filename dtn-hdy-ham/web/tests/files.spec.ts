@@ -196,8 +196,9 @@ test.describe('Files Internal DTN Service (BUNDLE_LIST & Detail)', () => {
     // Verify URL hash updated
     await expect(page).toHaveURL(/.*#\/files/);
 
-    // Verify header
+    // Verify header and endpoint with actual station node ID
     await expect(page.locator('h1:has-text("File Bundles")')).toBeVisible();
+    await expect(page.locator('code', { hasText: 'dtn://f4jxq/files' })).toBeVisible();
 
     // Verify items in list
     await expect(page.locator('text=dtn://f4abc/files')).toBeVisible();

@@ -204,8 +204,8 @@ test.describe('Interactive Chat Service & Messenger', () => {
     await page.locator('button', { hasText: '72h' }).click();
     await expect(lifetimeInput).toHaveValue('259200');
 
-    // Test clicking preset '1 semaine' updates value to 604800
-    await page.locator('button', { hasText: '1 semaine' }).click();
+    // Test clicking preset '1w' updates value to 604800
+    await page.locator('button', { hasText: '1w' }).click();
     await expect(lifetimeInput).toHaveValue('604800');
 
     // Switch back to '1h' preset (3600s)

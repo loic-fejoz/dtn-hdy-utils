@@ -269,6 +269,8 @@ export function App() {
           />
         ) : activeTab === 'files' ? (
           <FilesView
+            stationNodeId={config?.node_id}
+            stationCallsign={config?.callsign || undefined}
             selectedBundleId={selectedFileId}
             onSelectBundle={handleSelectFile}
             onReply={handleReplyFile}

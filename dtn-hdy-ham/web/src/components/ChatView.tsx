@@ -618,7 +618,7 @@ export function ChatView({
                         { label: '6h', secs: 21600 },
                         { label: '24h', secs: 86400 },
                         { label: '72h', secs: 259200 },
-                        { label: '1 semaine', secs: 604800 },
+                        { label: '1w', secs: 604800 },
                       ].map((p) => {
                         const isActive = lifetime === p.secs.toString();
                         return (
