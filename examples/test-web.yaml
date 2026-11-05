@@ -1,0 +1,13 @@
+# Test station with Web dashboard on 127.0.0.1:8080
+callsign: "STATA"
+
+storage:
+  in-memory: true
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3050"
+
+web:
+  address: "127.0.0.1:8088"
+  static-dir: "dtn-hdy-ham/web/dist"

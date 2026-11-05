@@ -1,7 +1,7 @@
 # Agent Router Guide
 
 ## Mission
-Provide command-line utilities (`dtnprint`, `dtnsend`, `dtnquery`, `dtntrigger`, `dtnping`, `dtnfiles`, `dtnforward`, `dtnbib`, and `hdy-stats`) for interacting with the `hardy` BPA implementation of DTN BPv7.
+Provide command-line utilities (`dtnprint`, `dtnsend`, `dtnquery`, `dtntrigger`, `dtnping`, `dtnfiles`, `dtnforward`, `dtnbib`, `dtnbasket`, `dtnbasket-cli`, `hdy-stats`, and `dtn-hdy-ham`), along with dedicated amateur radio convergence layers (`hardy-ltp`, `hardy-ltp-cla`, `hardy-hqfbp-cla`, `hardy-mercury-cla`), for interacting with and deploying the `hardy` BPA implementation of DTN BPv7.
 The source code of the `hardy` project is located at `../hardy`.
 The source code of the `DTN7` project is located at `../dtn7-rs`.
 
@@ -13,7 +13,12 @@ Always run verification tests and check formatting before final delivery:
 - **CI Sync**: Whenever updating `hardy` dependencies or signatures, update the `hardy` checkout `ref` in `.github/workflows/ci.yml`.
 
 ## Directory Map
-- `src/bin/`: Main executable utilities (`dtnprint`, `dtnsend`, `dtnquery`, `dtntrigger`, `dtnping`, `dtnfiles`, `dtnforward`, `dtnbib`, and `hdy-stats`).
+- `src/bin/`: Main client utility CLIs (`dtnprint`, `dtnsend`, `dtnquery`, `dtntrigger`, `dtnping`, `dtnfiles`, `dtnforward`, `dtnbib`, `dtnbasket`, `dtnbasket-cli`, and `hdy-stats`).
+- `dtn-hdy-ham/`: Dedicated standalone BPA binary and server daemon for amateur radio operators.
+- `ltp/`: Core Licklider Transmission Protocol (RFC 5326) engine crate (`hardy-ltp`).
+- `ltp-cla/`: LTP Convergence Layer Adapter for Hardy (`hardy-ltp-cla`).
+- `hqfbp-cla/`: Hamradio Quick File Broadcasting Protocol CLA for Hardy (`hardy-hqfbp-cla`).
+- `mercury-cla/`: Mercury TNC ARQ Connected Mode Convergence Layer for Hardy (`hardy-mercury-cla`).
 - `examples/`: Example scripts and usage demonstrations for the utilities.
 - `agent_docs/`: Reference documentation for autonomous developers.
 - `adr/`: Architectural Decision Records (ADRs) tracking design and implementation choices.

@@ -15,6 +15,13 @@ A collection of utility tools to interact with the `hardy` BPA implementation of
 - [**`dtnbasket-cli`**](src/bin/dtnbasket-cli.rs): A client CLI tool used to forge, sign, and transmit CBOR-serialized Basket request bundles to a remote responder service.
 - [**`dtnforward`**](src/bin/dtnforward.rs): Subscribes to a specified local service endpoint, wraps incoming bundles in a Bundle-in-Bundle Encapsulation (BIBE / RFC 9260) outer bundle, optionally signs it, and forwards it to a remote target EID via a dynamically registered CLA.
 - [**`dtnbib`**](src/bin/dtnbib.rs): A companion decapsulator for BIBE tunnels. It registers on the `bibe` endpoint, decapsulates outer bundles (Administrative Record 64443 or raw), handles EID alias rewriting to allow local delivery on Hardy while preventing infinite routing loops, verifies signatures, and re-signs modified inner bundles with local key material before re-injecting them.
+- [**`dtn-hdy-ham`**](dtn-hdy-ham/): A dedicated, lightweight Hardy BPv7 Bundle Protocol Agent (BPA) daemon tailored for amateur radio operators. Features built-in YAML configuration, SQLite storage with localdisk payloads, gRPC application interfaces, unencrypted Hamnet TCPCLv4 (`require-tls: false`), Licklider Transmission Protocol ([`ltp-cla`](ltp-cla/)), and Hamradio Quick File Broadcasting Protocol ([`hqfbp-cla`](hqfbp-cla/)) over KISS TNC interfaces.
+
+## Convergence Layer Adapters & Libraries
+
+- [**`ltp`**](ltp/): Pure Rust, zero-copy Licklider Transmission Protocol (RFC 5326) engine supporting red/green data, retransmission, and property testing.
+- [**`ltp-cla`**](ltp-cla/): Convergence Layer Adapter integrating the LTP engine into Hardy BPv7, with UDP and KISS over TCP (AX.25/TNC) support.
+- [**`hqfbp-cla`**](hqfbp-cla/): Hamradio Quick File Broadcasting Protocol (HQFBP) CLA for broadcasting DTN bundles over amateur packet radio, KISS TNCs, and UDP.
 
 ## Connection Resilience & Systemd Integration
 

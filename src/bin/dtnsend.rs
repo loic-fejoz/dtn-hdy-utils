@@ -124,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
             args.verbose,
         )?;
 
-        println!("Bundle-Id: {}", bundle.id.to_key());
+        println!("Bundle-Id: {}", bundle.primary.id.to_key());
         let hexstr: String = binbundle.iter().map(|b| format!("{:02x}", b)).collect();
         println!("{}", hexstr);
     } else {
@@ -139,7 +139,12 @@ async fn main() -> anyhow::Result<()> {
         // Register dynamically as a CLA with a unique name to avoid collisions
         let cla_name = format!("dtnsend-{}", std::process::id());
         let node_ids = remote_bpa
-            .register_cla(cla_name, sender_cla.clone(), None)
+            .register_cla(
+                cla_name,
+                sender_cla.clone(),
+                None,
+                hardy_bpa::cla::ClaInit::default(),
+            )
             .await
             .map_err(|e| anyhow::anyhow!("CLA registration failed: {e}"))?;
 
@@ -206,11 +211,12 @@ async fn main() -> anyhow::Result<()> {
 
         // Get the sink and send the payload
         if let Some(sink) = sender_cla.sink.get() {
-            sink.dispatch(Bytes::from(binbundle), None, None)
+            let _ = sink
+                .dispatch(None, None, &mut Bytes::from(binbundle))
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to send bundle: {e}"))?;
 
-            println!("Bundle-Id: {}", bundle.id.to_key());
+            println!("Bundle-Id: {}", bundle.primary.id.to_key());
 
             if args.verbose {
                 println!("Result: success");

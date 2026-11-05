@@ -102,10 +102,7 @@ impl FromCbor for CborBytes {
     fn from_cbor(data: &[u8]) -> Result<(Self, bool, usize), Self::Error> {
         decode::parse_value(data, |v, shortest, tags| {
             if !tags.is_empty() {
-                return Err(decode::Error::IncorrectType(
-                    "Untagged Bytes".to_string(),
-                    "Tagged".to_string(),
-                ));
+                return Err(decode::Error::UnexpectedTag);
             }
             match v {
                 Value::Bytes(r) => Ok((CborBytes(data[r].to_vec()), shortest)),
@@ -116,10 +113,7 @@ impl FromCbor for CborBytes {
                     }
                     Ok((CborBytes(bytes), shortest))
                 }
-                _ => Err(decode::Error::IncorrectType(
-                    "Bytes".to_string(),
-                    v.type_name(false),
-                )),
+                _ => Err(decode::Error::IncorrectType("Bytes", v.item_type(tags))),
             }
         })
         .map(|((v, s), len)| (v, s, len))
@@ -132,10 +126,7 @@ fn parse_cbor_text_value(
     tags: &[u64],
 ) -> Result<(String, bool), decode::Error> {
     if !tags.is_empty() {
-        return Err(decode::Error::IncorrectType(
-            "Untagged Text".to_string(),
-            "Tagged".to_string(),
-        ));
+        return Err(decode::Error::UnexpectedTag);
     }
     match v {
         Value::Text(t) => Ok((t.to_string(), shortest)),
@@ -146,10 +137,7 @@ fn parse_cbor_text_value(
             });
             Ok((combined, shortest))
         }
-        _ => Err(decode::Error::IncorrectType(
-            "Text".to_string(),
-            v.type_name(!tags.is_empty()),
-        )),
+        _ => Err(decode::Error::IncorrectType("Text", v.item_type(tags))),
     }
 }
 
@@ -176,8 +164,8 @@ impl FromCbor for CborFormat {
             Value::UnsignedInteger(n) => Ok((CborFormat(n.to_string()), shortest)),
             Value::Text(t) => Ok((CborFormat(t.to_string()), shortest)),
             _ => Err(decode::Error::IncorrectType(
-                "Uint or Text".to_string(),
-                v.type_name(false),
+                "Uint or Text",
+                v.item_type(_tags),
             )),
         })
         .map(|((v, s), len)| (v, s, len))
@@ -202,8 +190,8 @@ impl FromCbor for CborReqId {
                 Ok((CborReqId(hex::encode(&bytes)), shortest))
             }
             _ => Err(decode::Error::IncorrectType(
-                "Text or Bytes".to_string(),
-                v.type_name(!tags.is_empty()),
+                "Text or Bytes",
+                v.item_type(tags),
             )),
         })
         .map(|((v, s), len)| (v, s, len))
@@ -245,10 +233,7 @@ impl FromCbor for RequestItem {
                                 }
                                 Ok(())
                             }
-                            _ => Err(decode::Error::IncorrectType(
-                                "Array".to_string(),
-                                val.type_name(false),
-                            )),
+                            _ => Err(decode::Error::IncorrectType("Array", val.item_type(&[]))),
                         })?;
                         accepted_formats = Some(formats);
                     }
@@ -262,10 +247,7 @@ impl FromCbor for RequestItem {
                                 }
                                 Ok(())
                             }
-                            _ => Err(decode::Error::IncorrectType(
-                                "Array".to_string(),
-                                val.type_name(false),
-                            )),
+                            _ => Err(decode::Error::IncorrectType("Array", val.item_type(&[]))),
                         })?;
                         have_hashes = Some(hashes);
                     }
@@ -341,10 +323,7 @@ impl FromCbor for BasketRequest {
                                 }
                                 Ok(())
                             }
-                            _ => Err(decode::Error::IncorrectType(
-                                "Array".to_string(),
-                                val.type_name(false),
-                            )),
+                            _ => Err(decode::Error::IncorrectType("Array", val.item_type(&[]))),
                         })?;
                     }
                     _ => {
@@ -353,12 +332,8 @@ impl FromCbor for BasketRequest {
                 }
             }
 
-            let version = version.ok_or_else(|| {
-                decode::Error::IncorrectType("version field".to_string(), "missing".to_string())
-            })?;
-            let req_id = req_id.ok_or_else(|| {
-                decode::Error::IncorrectType("req_id field".to_string(), "missing".to_string())
-            })?;
+            let version = version.ok_or(decode::Error::PartialMap)?;
+            let req_id = req_id.ok_or(decode::Error::PartialMap)?;
 
             Ok((
                 BasketRequest {
@@ -653,12 +628,7 @@ impl FromCbor for ItemResponse {
                     }
                     1 => {
                         let val = m.parse::<u64>()?;
-                        coap_status = u8::try_from(val).map_err(|_| {
-                            decode::Error::IncorrectType(
-                                "u8 CoAP status".to_string(),
-                                val.to_string(),
-                            )
-                        })?;
+                        coap_status = u8::try_from(val)?;
                     }
                     2 => {
                         metadata = Some(m.parse::<ItemMetadata>()?);
@@ -721,10 +691,7 @@ impl FromCbor for BasketResponse {
                                 }
                                 Ok(())
                             }
-                            _ => Err(decode::Error::IncorrectType(
-                                "Array".to_string(),
-                                val.type_name(false),
-                            )),
+                            _ => Err(decode::Error::IncorrectType("Array", val.item_type(&[]))),
                         })?;
                     }
                     _ => {
@@ -733,12 +700,8 @@ impl FromCbor for BasketResponse {
                 }
             }
 
-            let version = version.ok_or_else(|| {
-                decode::Error::IncorrectType("version field".to_string(), "missing".to_string())
-            })?;
-            let req_id = req_id.ok_or_else(|| {
-                decode::Error::IncorrectType("req_id field".to_string(), "missing".to_string())
-            })?;
+            let version = version.ok_or(decode::Error::PartialMap)?;
+            let req_id = req_id.ok_or(decode::Error::PartialMap)?;
 
             Ok((
                 BasketResponse {

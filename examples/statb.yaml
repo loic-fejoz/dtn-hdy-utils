@@ -1,0 +1,14 @@
+# Configuration for Station B (STATB)
+node-id: "dtn://statb.ampr.org/"
+storage:
+  in-memory: true
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3051"
+
+clas:
+  - name: "tcpcl-statb"
+    type: "tcpclv4"
+    address: "127.0.0.1:4552"
+    require-tls: false

@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use clap::Parser;
 use dtn_hdy_utils::resolve_grpc_port;
 use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
@@ -68,25 +67,27 @@ impl BpaService for PrintService {
         std::process::exit(1);
     }
 
-    async fn on_receive(
+    async fn on_deliver(
         &self,
-        data: Bytes,
+        _bundle_id: &hardy_bpv7::bundle::Id,
         _expiry: time::OffsetDateTime,
+        total_len: u64,
+        stream: &mut dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment>,
     ) -> hardy_bpa::services::Result<()> {
-        let (source, text) =
-            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
-                Ok(parsed) => {
-                    let payload_text = parsed
-                        .bundle
-                        .blocks
-                        .get(&1)
-                        .and_then(|b| data.get(b.payload_range()))
-                        .map(|bytes| String::from_utf8_lossy(bytes).to_string())
-                        .unwrap_or_else(|| String::from_utf8_lossy(&data).to_string());
-                    (parsed.bundle.id.source, payload_text)
-                }
-                Err(_) => (Eid::Null, String::from_utf8_lossy(&data).to_string()),
-            };
+        let data = hardy_bpa::stream::buffer_stream(stream, total_len).await?;
+        let (source, text) = match hardy_bpv7::parse::parse(data.clone()) {
+            Ok(parsed) => {
+                let payload_text = parsed
+                    .bundle
+                    .blocks
+                    .get(&1)
+                    .and_then(|b| b.payload(&parsed.data))
+                    .map(|bytes| String::from_utf8_lossy(bytes).to_string())
+                    .unwrap_or_else(|| String::from_utf8_lossy(&data).to_string());
+                (parsed.bundle.primary.id.source, payload_text)
+            }
+            Err(_) => (Eid::Null, String::from_utf8_lossy(&data).to_string()),
+        };
 
         if self.policy != VerifyPolicy::Ignore {
             let res = verify_bundle(&data, &self.keystore);

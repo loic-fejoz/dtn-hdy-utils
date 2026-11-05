@@ -1,3 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",
+    "ltp",
+    "ltp/fuzz",
+    "ltp-cla",
+    "ltp-cla/fuzz",
+    "hqfbp-cla",
+    "hqfbp-cla/fuzz",
+    "mercury-cla",
+    "dtn-hdy-ham",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/loic-fejoz/dtn-hdy-utils"
+
 [package]
 name = "dtn-hdy-utils"
 version = "0.1.0"

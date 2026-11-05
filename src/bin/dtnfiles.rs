@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use clap::Parser;
 use dtn_hdy_utils::resolve_grpc_port;
 use dtn_hdy_utils::security::{KeyStore, VerifyPolicy, VerifyResult, load_key, verify_bundle};
@@ -183,52 +182,63 @@ impl BpaService for FilesService {
         std::process::exit(1);
     }
 
-    async fn on_receive(
+    async fn on_deliver(
         &self,
-        data: Bytes,
+        _bundle_id: &hardy_bpv7::bundle::Id,
         _expiry: time::OffsetDateTime,
+        total_len: u64,
+        stream: &mut dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment>,
     ) -> hardy_bpa::services::Result<()> {
-        let (source, bundle_id_str, payload, bundle_meta) =
-            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
-                Ok(parsed) => {
-                    let payload_bytes = parsed
+        let data = hardy_bpa::stream::buffer_stream(stream, total_len).await?;
+        let (source, bundle_id_str, payload, bundle_meta) = match hardy_bpv7::parse::parse(
+            data.clone(),
+        ) {
+            Ok(parsed) => {
+                let payload_bytes = parsed
+                    .bundle
+                    .blocks
+                    .get(&1)
+                    .and_then(|b| b.payload(&parsed.data))
+                    .map(|bytes| bytes.to_vec())
+                    .unwrap_or_else(|| data.to_vec());
+                let bundle_id_str = parsed.bundle.primary.id.to_key();
+                let source = parsed.bundle.primary.id.source.clone();
+
+                let creation_time =
+                    parsed
                         .bundle
-                        .blocks
-                        .get(&1)
-                        .and_then(|b| data.get(b.payload_range()))
-                        .map(|bytes| bytes.to_vec())
-                        .unwrap_or_else(|| data.to_vec());
-                    let bundle_id_str = parsed.bundle.id.to_key();
-                    let source = parsed.bundle.id.source.clone();
+                        .primary
+                        .id
+                        .timestamp
+                        .as_datetime()
+                        .and_then(|dt| {
+                            dt.format(&time::format_description::well_known::Rfc3339)
+                                .ok()
+                        });
 
-                    let creation_time = parsed.bundle.id.timestamp.as_datetime().and_then(|dt| {
-                        dt.format(&time::format_description::well_known::Rfc3339)
-                            .ok()
-                    });
+                let meta_val = serde_json::json!({
+                    "bundle_id": bundle_id_str,
+                    "source": parsed.bundle.primary.id.source.to_string(),
+                    "destination": parsed.bundle.primary.destination.to_string(),
+                    "report_to": parsed.bundle.primary.report_to.to_string(),
+                    "creation_time": creation_time,
+                    "sequence_number": parsed.bundle.primary.id.timestamp.sequence_number(),
+                    "lifetime_seconds": parsed.bundle.primary.lifetime.as_secs(),
+                    "is_fragment": parsed.bundle.primary.id.fragment_info.is_some(),
+                    "fragment_offset": parsed.bundle.primary.id.fragment_info.as_ref().map(|f| f.offset),
+                    "total_adu_length": parsed.bundle.primary.id.fragment_info.as_ref().map(|f| f.total_adu_length),
+                });
 
-                    let meta_val = serde_json::json!({
-                        "bundle_id": bundle_id_str,
-                        "source": parsed.bundle.id.source.to_string(),
-                        "destination": parsed.bundle.destination.to_string(),
-                        "report_to": parsed.bundle.report_to.to_string(),
-                        "creation_time": creation_time,
-                        "sequence_number": parsed.bundle.id.timestamp.sequence_number(),
-                        "lifetime_seconds": parsed.bundle.lifetime.as_secs(),
-                        "is_fragment": parsed.bundle.id.fragment_info.is_some(),
-                        "fragment_offset": parsed.bundle.id.fragment_info.as_ref().map(|f| f.offset),
-                        "total_adu_length": parsed.bundle.id.fragment_info.as_ref().map(|f| f.total_adu_length),
-                    });
-
-                    (source, bundle_id_str, payload_bytes, Some(meta_val))
-                }
-                Err(_) => {
-                    use sha2::{Digest, Sha256};
-                    let mut hasher = Sha256::new();
-                    hasher.update(&data);
-                    let hash = hex::encode(hasher.finalize());
-                    (Eid::Null, hash, data.to_vec(), None)
-                }
-            };
+                (source, bundle_id_str, payload_bytes, Some(meta_val))
+            }
+            Err(_) => {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(&data);
+                let hash = hex::encode(hasher.finalize());
+                (Eid::Null, hash, data.to_vec(), None)
+            }
+        };
 
         if self.policy != VerifyPolicy::Ignore {
             let res = verify_bundle(&data, &self.keystore);
@@ -272,9 +282,9 @@ impl BpaService for FilesService {
                 .map_err(|e| e.to_string())
                 .and_then(|resp| serde_json::to_string_pretty(&resp).map_err(|e| e.to_string()))
                 .map(|json_str| json_str.into_bytes())
-                .unwrap_or_else(|_| payload.clone())
+                .unwrap_or_else(|_| payload.to_vec())
         } else {
-            payload.clone()
+            payload.to_vec()
         };
 
         if self.verbose {

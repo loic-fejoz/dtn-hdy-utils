@@ -16,15 +16,12 @@ use tokio::sync::OnceCell;
 /// Check the nesting depth of a CBOR bundle payload to prevent infinite BIBE loops.
 fn get_bundle_depth(data: &[u8]) -> usize {
     let mut depth = 0;
-    let mut current_bytes = data;
-    while let Ok(parsed) =
-        hardy_bpv7::bundle::ParsedBundle::parse(current_bytes, hardy_bpv7::bpsec::no_keys)
-    {
+    let mut current_bytes = Bytes::copy_from_slice(data);
+    while let Ok(parsed) = hardy_bpv7::parse::parse(current_bytes.clone()) {
         depth += 1;
         if let Some(payload_block) = parsed.bundle.blocks.get(&1) {
-            let range = payload_block.payload_range();
-            if range.end <= current_bytes.len() {
-                current_bytes = &current_bytes[range.clone()];
+            if let Some(payload) = payload_block.payload(&parsed.data) {
+                current_bytes = Bytes::copy_from_slice(payload);
             } else {
                 break;
             }
@@ -37,17 +34,15 @@ fn get_bundle_depth(data: &[u8]) -> usize {
 
 /// Calculate remaining lifetime of a bundle based on age block or creation timestamp.
 fn get_remaining_lifetime(bundle: &hardy_bpv7::bundle::Bundle) -> Option<std::time::Duration> {
-    if let Some(age) = bundle.age {
-        bundle.lifetime.checked_sub(age)
-    } else if let Some(created_at) = bundle.id.timestamp.as_datetime() {
+    if let Some(created_at) = bundle.primary.id.timestamp.as_datetime() {
         let now = time::OffsetDateTime::now_utc();
         let age_since_creation = now - created_at;
         if age_since_creation.is_negative() {
-            Some(bundle.lifetime)
+            Some(bundle.primary.lifetime)
         } else {
             let age_duration =
                 std::time::Duration::from_secs(age_since_creation.whole_seconds() as u64);
-            bundle.lifetime.checked_sub(age_duration)
+            bundle.primary.lifetime.checked_sub(age_duration)
         }
     } else {
         None
@@ -158,16 +153,18 @@ impl BpaService for ForwardService {
         std::process::exit(1);
     }
 
-    async fn on_receive(
+    async fn on_deliver(
         &self,
-        data: Bytes,
+        _bundle_id: &hardy_bpv7::bundle::Id,
         _expiry: time::OffsetDateTime,
+        total_len: u64,
+        stream: &mut dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment>,
     ) -> hardy_bpa::services::Result<()> {
-        let inner_parsed =
-            hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys);
+        let data = hardy_bpa::stream::buffer_stream(stream, total_len).await?;
+        let inner_parsed = hardy_bpv7::parse::parse(data.clone());
 
         let inner_source = match &inner_parsed {
-            Ok(parsed) => parsed.bundle.id.source.clone(),
+            Ok(parsed) => parsed.bundle.primary.id.source.clone(),
             Err(_) => Eid::Null,
         };
 
@@ -287,11 +284,11 @@ impl BpaService for ForwardService {
             eprintln!(
                 "Forwarding bundle: inner_id={} (len={}) -> outer_id={} (len={}) to {} with lifetime {}s",
                 match &inner_parsed {
-                    Ok(p) => p.bundle.id.to_key(),
+                    Ok(p) => p.bundle.primary.id.to_key(),
                     Err(_) => "unknown".to_string(),
                 },
                 data.len(),
-                outer_bundle.id.to_key(),
+                outer_bundle.primary.id.to_key(),
                 outer_binbundle.len(),
                 self.target_destination,
                 outer_lifetime.as_secs()
@@ -300,17 +297,17 @@ impl BpaService for ForwardService {
 
         if let Some(sink) = self.sender_cla.sink.get() {
             match sink
-                .dispatch(Bytes::from(outer_binbundle), None, None)
+                .dispatch(None, None, &mut Bytes::from(outer_binbundle))
                 .await
             {
                 Ok(_) => {
                     eprintln!(
                         "Forwarded bundle: inner_id={} -> outer_id={} to {}",
                         match &inner_parsed {
-                            Ok(p) => p.bundle.id.to_key(),
+                            Ok(p) => p.bundle.primary.id.to_key(),
                             Err(_) => "unknown".to_string(),
                         },
-                        outer_bundle.id.to_key(),
+                        outer_bundle.primary.id.to_key(),
                         self.target_destination
                     );
                 }
@@ -352,7 +349,12 @@ async fn main() -> anyhow::Result<()> {
     // Register dynamically as a CLA to get node EIDs and send outer bundles
     let cla_name = format!("dtnforward-cla-{}", std::process::id());
     let node_ids = remote_bpa
-        .register_cla(cla_name, sender_cla.clone(), None)
+        .register_cla(
+            cla_name,
+            sender_cla.clone(),
+            None,
+            hardy_bpa::cla::ClaInit::default(),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("CLA registration failed: {e}"))?;
 

@@ -1,0 +1,22 @@
+# Station B (STATB) using LTP over Mercury TCP KISS (Station B broadcast port 8500)
+node-id: "dtn://statb.ampr.org/"
+storage:
+  in-memory: true
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3051"
+
+clas:
+  - name: "ltp-mercury-b"
+    type: "ltp"
+    engine-id: 2
+    max-segment-payload-len: 80
+    rtt: "3s"
+    ack-margin: "2s"
+    transport:
+      type: "kiss-tcp"
+      server-addr: "127.0.0.1:8500"
+    peers:
+      - engine-id: 1
+        node-id: "dtn://stata.ampr.org/"

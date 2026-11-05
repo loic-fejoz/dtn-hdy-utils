@@ -202,7 +202,12 @@ async fn main() -> Result<()> {
 
     let cla_name = format!("dtnbasket-cli-{}", std::process::id());
     let node_ids = remote_bpa
-        .register_cla(cla_name, sender_cla.clone(), None)
+        .register_cla(
+            cla_name,
+            sender_cla.clone(),
+            None,
+            hardy_bpa::cla::ClaInit::default(),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("CLA registration failed: {e}"))?;
 
@@ -312,12 +317,14 @@ async fn main() -> Result<()> {
     )?;
 
     if let Some(sink) = sender_cla.sink.get() {
-        sink.dispatch(Bytes::from(binbundle), None, None)
+        let mut bundle_stream = Bytes::from(binbundle);
+        let _ = sink
+            .dispatch(None, None, &mut bundle_stream)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to dispatch request bundle: {e}"))?;
 
         // Print final bundle ID on stdout
-        println!("Bundle-Id: {}", bundle.id.to_key());
+        println!("Bundle-Id: {}", bundle.primary.id.to_key());
 
         if args.verbose {
             eprintln!("Result: success");

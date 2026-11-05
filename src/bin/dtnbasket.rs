@@ -337,14 +337,22 @@ fn is_safe_ip(ip: std::net::IpAddr) -> bool {
         return false;
     }
     match ip {
-        std::net::IpAddr::V4(v4) => !v4.is_private() && !v4.is_link_local(),
+        std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            // Block 0.0.0.0/8
+            if octets[0] == 0 {
+                return false;
+            }
+            // Block CGNAT / Shared Address Space 100.64.0.0/10 (RFC 6598)
+            if octets[0] == 100 && (octets[1] & 0b1100_0000) == 64 {
+                return false;
+            }
+            !v4.is_private() && !v4.is_link_local() && !v4.is_broadcast()
+        }
         std::net::IpAddr::V6(v6) => {
-            // Check if it's an IPv4-mapped IPv6 address
-            if let Some(v4) = v6.to_ipv4() {
-                return !v4.is_loopback()
-                    && !v4.is_unspecified()
-                    && !v4.is_private()
-                    && !v4.is_link_local();
+            // Check if it's an IPv4-mapped IPv6 address (::ffff:x.x.x.x)
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_safe_ip(std::net::IpAddr::V4(v4));
             }
             let is_link_local = (v6.segments()[0] & 0xffc0) == 0xfe80;
             let is_unique_local = (v6.segments()[0] & 0xfe00) == 0xfc00;
@@ -937,7 +945,7 @@ impl BasketService {
             .map_err(|e| anyhow::anyhow!("Failed to build control bundle: {e}"))?;
 
         let (_, control_bin_signed) = self.maybe_sign(&control_bundle, control_bin.into_vec())?;
-        sink.send(Bytes::from(control_bin_signed)).await?;
+        sink.send(&mut Bytes::from(control_bin_signed)).await?;
 
         // Send raw content bundles
         for (raw_bytes, hash, lifetime) in raw_bundles_to_send {
@@ -952,12 +960,12 @@ impl BasketService {
             if self.verbose {
                 eprintln!(
                     "Sending raw bundle {} with hash {} and size {} bytes",
-                    raw_bundle.id.to_key(),
+                    raw_bundle.primary.id.to_key(),
                     hex::encode(&hash),
                     raw_bin_signed.len()
                 );
             }
-            sink.send(Bytes::from(raw_bin_signed)).await?;
+            sink.send(&mut Bytes::from(raw_bin_signed)).await?;
         }
 
         Ok(())
@@ -1373,25 +1381,27 @@ impl BpaService for BasketServiceWrapper {
         self.0.on_unregister().await;
     }
 
-    async fn on_receive(
+    async fn on_deliver(
         &self,
-        data: Bytes,
+        _id: &hardy_bpv7::bundle::Id,
         _expiry: time::OffsetDateTime,
+        total_len: u64,
+        stream: &mut dyn hardy_bpa::stream::Receiver<hardy_bpa::stream::Segment>,
     ) -> hardy_bpa::services::Result<()> {
-        let (source, payload) =
-            match hardy_bpv7::bundle::ParsedBundle::parse(&data, hardy_bpv7::bpsec::no_keys) {
-                Ok(parsed) => {
-                    let payload_bytes = parsed
-                        .bundle
-                        .blocks
-                        .get(&1)
-                        .and_then(|b| data.get(b.payload_range()))
-                        .map(|bytes| bytes.to_vec())
-                        .unwrap_or_else(|| data.to_vec());
-                    (parsed.bundle.id.source, payload_bytes)
-                }
-                Err(_) => (Eid::Null, data.to_vec()),
-            };
+        let data = hardy_bpa::stream::buffer_stream(stream, total_len).await?;
+        let (source, payload) = match hardy_bpv7::parse::parse(data.clone()) {
+            Ok(parsed) => {
+                let payload_bytes = parsed
+                    .bundle
+                    .blocks
+                    .get(&1)
+                    .and_then(|b| b.payload(&parsed.data))
+                    .map(|bytes| bytes.to_vec())
+                    .unwrap_or_else(|| data.to_vec());
+                (parsed.bundle.primary.id.source, payload_bytes)
+            }
+            Err(_) => (Eid::Null, data.to_vec()),
+        };
 
         if self.0.policy != VerifyPolicy::Ignore {
             let res = verify_bundle(&data, &self.0.keystore);

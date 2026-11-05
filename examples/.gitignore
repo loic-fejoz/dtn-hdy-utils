@@ -3,3 +3,4 @@ matrix_store
 __pycache__
 dtn_fortunes.dat
 dtn_fortunes_fr.dat
+direwolf/logs

@@ -1,3 +1,6 @@
 /target
 /sbom.json
 /.zed
+agy-landrun.sh
+__pycache__/
+*.pyc
