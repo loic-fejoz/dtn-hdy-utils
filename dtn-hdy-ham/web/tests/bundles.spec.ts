@@ -107,11 +107,13 @@ test.describe('Bundle Storage Inspector & Multi-Format Viewer', () => {
     await page.goto('/');
   });
 
-  test('displays correct navbar tabs order: Configuration -> Bundles -> Send Bundle', async ({ page }) => {
+  test('displays correct navbar tabs order: Configuration -> Chat -> Files -> Bundles -> Send Bundle', async ({ page }) => {
     const navButtons = page.locator('header nav button');
     await expect(navButtons.nth(0)).toContainText('Configuration');
-    await expect(navButtons.nth(1)).toContainText('Bundles');
-    await expect(navButtons.nth(2)).toContainText('Send Bundle');
+    await expect(navButtons.nth(1)).toContainText('Chat');
+    await expect(navButtons.nth(2)).toContainText('Files');
+    await expect(navButtons.nth(3)).toContainText('Bundles');
+    await expect(navButtons.nth(4)).toContainText('Send Bundle');
   });
 
   test('navigates to Bundles tab and renders bundle storage table', async ({ page }) => {

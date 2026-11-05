@@ -33,6 +33,7 @@ pub struct HamServer {
     coordinators: Vec<ContactCoordinator>,
     web_injector: Option<WebBundleInjector>,
     cla_manager: crate::cla_manager::ClaManager,
+    chat_manager: crate::chat_manager::ChatManager,
     _ephemeral_dir: Option<tempfile::TempDir>,
     tasks: TaskPool,
 }
@@ -45,56 +46,59 @@ impl HamServer {
         let mut ephemeral_dir = None;
 
         // 1. Storage setup
-        let (metadata_storage, bundle_storage): (Arc<dyn MetadataStorage>, Arc<dyn BundleStorage>) =
-            if config.storage.in_memory {
-                info!("Using ephemeral SQLite bundle and metadata storage for in-memory mode");
-                let temp = tempfile::Builder::new()
-                    .prefix("dtn-ham-mem-")
-                    .tempdir()
-                    .context("Failed to create temporary directory for in-memory storage")?;
-                let data_dir = temp.path().to_path_buf();
-                let db_path = data_dir.join("bundles.db");
-                let bundle_dir = data_dir.join("payloads");
-                let _ = std::fs::create_dir_all(&data_dir);
-                let _ = std::fs::create_dir_all(&bundle_dir);
+        let (metadata_storage, bundle_storage, chat_manager): (
+            Arc<dyn MetadataStorage>,
+            Arc<dyn BundleStorage>,
+            crate::chat_manager::ChatManager,
+        ) = if config.storage.in_memory {
+            info!("Using ephemeral SQLite bundle and metadata storage for in-memory mode");
+            let temp = tempfile::Builder::new()
+                .prefix("dtn-ham-mem-")
+                .tempdir()
+                .context("Failed to create temporary directory for in-memory storage")?;
+            let data_dir = temp.path().to_path_buf();
+            let db_path = data_dir.join("bundles.db");
+            let bundle_dir = data_dir.join("payloads");
+            let _ = std::fs::create_dir_all(&data_dir);
+            let _ = std::fs::create_dir_all(&bundle_dir);
 
-                config.storage.data_dir = Some(data_dir.clone());
-                config.storage.sqlite_path = Some(db_path);
+            config.storage.data_dir = Some(data_dir.clone());
+            config.storage.sqlite_path = Some(db_path);
 
-                let meta_store = Arc::new(SqliteStorage::new(
-                    Some(data_dir),
-                    Some("bundles.db".to_string()),
-                    true,
-                ));
-                let bundle_store =
-                    Arc::new(LocalDiskStorage::new(Some(bundle_dir), Some(false), true));
-                ephemeral_dir = Some(temp);
-                (meta_store, bundle_store)
-            } else {
-                let data_dir = config.storage.effective_data_dir();
-                let db_path = config.storage.effective_db_path();
-                let bundle_dir = config.storage.effective_payload_dir();
+            let meta_store = Arc::new(SqliteStorage::new(
+                Some(data_dir),
+                Some("bundles.db".to_string()),
+                true,
+            ));
+            let bundle_store = Arc::new(LocalDiskStorage::new(Some(bundle_dir), Some(false), true));
+            ephemeral_dir = Some(temp);
+            let chat_mgr = crate::internal_storage::InternalStorage::new_in_memory()?;
+            (meta_store, bundle_store, chat_mgr)
+        } else {
+            let data_dir = config.storage.effective_data_dir();
+            let db_path = config.storage.effective_db_path();
+            let bundle_dir = config.storage.effective_payload_dir();
 
-                let _ = std::fs::create_dir_all(&data_dir);
-                let _ = std::fs::create_dir_all(&bundle_dir);
+            let _ = std::fs::create_dir_all(&data_dir);
+            let _ = std::fs::create_dir_all(&bundle_dir);
 
-                info!("Using SQLite metadata storage at {}", db_path.display());
-                info!(
-                    "Using localdisk bundle payload storage at {}",
-                    bundle_dir.display()
-                );
+            info!("Using SQLite metadata storage at {}", db_path.display());
+            info!(
+                "Using localdisk bundle payload storage at {}",
+                bundle_dir.display()
+            );
 
-                let db_dir = Some(data_dir);
-                let db_name = db_path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|s| s.to_string());
+            let db_dir = Some(data_dir.clone());
+            let db_name = db_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string());
 
-                let meta_store = Arc::new(SqliteStorage::new(db_dir, db_name, true));
-                let bundle_store =
-                    Arc::new(LocalDiskStorage::new(Some(bundle_dir), Some(false), true));
-                (meta_store, bundle_store)
-            };
+            let meta_store = Arc::new(SqliteStorage::new(db_dir, db_name, true));
+            let bundle_store = Arc::new(LocalDiskStorage::new(Some(bundle_dir), Some(false), true));
+            let chat_mgr = crate::internal_storage::InternalStorage::new_disk(&data_dir)?;
+            (meta_store, bundle_store, chat_mgr)
+        };
 
         // 2. Parse Node IDs
         let mut endpoints = Vec::new();
@@ -109,6 +113,14 @@ impl HamServer {
             .node_ids(node_ids)
             .metadata_storage(metadata_storage)
             .bundle_storage(bundle_storage);
+
+        let rfc9171 = config.rfc9171_validity.clone().unwrap_or_default();
+        if let Some(enabled) = rfc9171.primary_block_integrity {
+            builder = builder.primary_block_integrity(enabled);
+        }
+        if let Some(enabled) = rfc9171.bundle_age_required {
+            builder = builder.bundle_age_required(enabled);
+        }
 
         // 3. Register Static Routes if configured
         if !config.routes.is_empty() {
@@ -352,6 +364,7 @@ impl HamServer {
             coordinators,
             web_injector,
             cla_manager,
+            chat_manager,
             _ephemeral_dir: ephemeral_dir,
             tasks,
         })
@@ -377,6 +390,55 @@ impl HamServer {
                 warn!("Failed to register built-in Echo service: {}", e);
             }
         }
+
+        // Register permanent built-in Chat service
+        let chat_service = Arc::new(crate::chat_service::ChatService::new(
+            self.chat_manager.clone(),
+            self.service_tracker.clone(),
+        ));
+        let chat_service_id = hardy_bpv7::eid::Service::Dtn("chat".into());
+        match self
+            .service_tracker
+            .register_service_with_type(chat_service_id, chat_service, "Built-in Chat")
+            .await
+        {
+            Ok(eid) => {
+                info!("Registered permanent built-in Chat service at EID: {}", eid);
+            }
+            Err(e) => {
+                warn!("Failed to register built-in Chat service: {}", e);
+            }
+        }
+
+        // Register permanent built-in Files service
+        let files_service = Arc::new(crate::files_service::FilesService::new(
+            self.chat_manager.clone(),
+            self.service_tracker.clone(),
+        ));
+        let files_service_id = hardy_bpv7::eid::Service::Dtn("files".into());
+        match self
+            .service_tracker
+            .register_service_with_type(files_service_id, files_service, "Built-in Files")
+            .await
+        {
+            Ok(eid) => {
+                info!(
+                    "Registered permanent built-in Files service at EID: {}",
+                    eid
+                );
+            }
+            Err(e) => {
+                warn!("Failed to register built-in Files service: {}", e);
+            }
+        }
+
+        // Spawn cyclic expiration reaper for non-sticky internal bundles and messages
+        let reaper_cancel = self.tasks.cancel_token().clone();
+        crate::internal_storage::spawn_expiration_reaper(
+            self.chat_manager.clone(),
+            self.service_tracker.clone(),
+            reaper_cancel,
+        );
 
         let coordinators = std::mem::take(&mut self.coordinators);
         for coordinator in coordinators {
@@ -440,6 +502,8 @@ impl HamServer {
                 injector: self.web_injector.clone().expect("web_injector initialized"),
                 service_tracker: self.service_tracker.clone(),
                 cla_manager: self.cla_manager.clone(),
+                chat_manager: self.chat_manager.clone(),
+                internal_storage: self.chat_manager.clone(),
             };
             let cancel = self.tasks.cancel_token().clone();
             let addr = web_config.address;
@@ -502,5 +566,17 @@ impl HamServer {
     #[must_use]
     pub fn cla_manager(&self) -> crate::cla_manager::ClaManager {
         self.cla_manager.clone()
+    }
+
+    /// Accessor for the Chat manager.
+    #[must_use]
+    pub fn chat_manager(&self) -> crate::chat_manager::ChatManager {
+        self.chat_manager.clone()
+    }
+
+    /// Accessor for the station internal storage.
+    #[must_use]
+    pub fn internal_storage(&self) -> crate::internal_storage::InternalStorage {
+        self.chat_manager.clone()
     }
 }

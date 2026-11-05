@@ -22,6 +22,8 @@ pub struct AppState {
     pub injector: WebBundleInjector,
     pub service_tracker: crate::service_tracker::ServiceTracker,
     pub cla_manager: crate::cla_manager::ClaManager,
+    pub chat_manager: crate::chat_manager::ChatManager,
+    pub internal_storage: crate::internal_storage::InternalStorage,
 }
 
 /// Builds the Axum router with API endpoints and SPA static asset fallback.
@@ -65,7 +67,47 @@ pub fn create_router(state: AppState) -> Router {
             "/bundles/payload",
             get(routes::bundles::get_bundle_payload_handler),
         )
-        .route("/clas/connect", post(routes::clas::connect_peer_handler));
+        .route("/clas/connect", post(routes::clas::connect_peer_handler))
+        .route(
+            "/chat/conversations",
+            get(routes::chat::list_conversations).post(routes::chat::create_conversation),
+        )
+        .route(
+            "/chat/conversations/{peer}",
+            get(routes::chat::get_conversation_messages).post(routes::chat::send_chat_message),
+        )
+        .route(
+            "/chat/conversations/{peer}/read",
+            post(routes::chat::mark_conversation_read),
+        )
+        .route(
+            "/chat/messages",
+            get(routes::chat::get_conversation_messages_query)
+                .post(routes::chat::send_chat_message_body),
+        )
+        .route(
+            "/chat/read",
+            post(routes::chat::mark_conversation_read_body),
+        )
+        .route(
+            "/chat/messages/{id}/sticky",
+            post(routes::chat::toggle_chat_sticky),
+        )
+        .route("/files", get(routes::files::list_files))
+        .route(
+            "/files/{id}",
+            get(routes::files::get_file_details).delete(routes::files::delete_file_bundle),
+        )
+        .route(
+            "/files/{id}/payload",
+            get(routes::files::download_file_payload),
+        )
+        .route(
+            "/files/{id}/sticky",
+            post(routes::files::toggle_file_sticky),
+        )
+        .route("/files/{id}/read", post(routes::files::mark_file_read))
+        .route("/files/unread", get(routes::files::get_unread_count));
 
     if static_dir.exists() {
         info!(

@@ -64,6 +64,15 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
         return ("audio/wav", true);
     }
     if data.len() >= 4 && &data[0..4] == b"OggS" {
+        if data.len() >= 36 {
+            let page_segments = data[26] as usize;
+            let packet_offset = 27 + page_segments;
+            if data.len() >= packet_offset + 8
+                && &data[packet_offset..packet_offset + 8] == b"OpusHead"
+            {
+                return ("audio/ogg; codecs=opus", true);
+            }
+        }
         return ("audio/ogg", true);
     }
     if (data.len() >= 3 && &data[0..3] == b"ID3")

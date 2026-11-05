@@ -548,9 +548,18 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                             <div class="text-4xl">🎙️</div>
                             <audio
                               controls
-                              src={`/api/v1/bundles/payload?id=${encodeURIComponent(bundleDetail.id)}`}
                               class="w-full max-w-md"
-                            />
+                            >
+                              <source
+                                src={`/api/v1/bundles/payload?id=${encodeURIComponent(bundleDetail.id)}`}
+                                type="audio/ogg; codecs=opus"
+                              />
+                              <source
+                                src={`/api/v1/bundles/payload?id=${encodeURIComponent(bundleDetail.id)}`}
+                                type="audio/ogg"
+                              />
+                              Your browser does not support the audio element.
+                            </audio>
                             <div class="text-xs text-slate-500 dark:text-slate-400 font-mono">
                               {bundleDetail.mime_type} · {formatBytes(bundleDetail.payload_size)}
                             </div>

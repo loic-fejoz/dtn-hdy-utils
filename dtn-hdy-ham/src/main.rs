@@ -95,6 +95,11 @@ clas:
 routes:
   - pattern: "dtn://*/*"
     cla: "tcpcl-44net-gateway"
+
+# RFC 9171 ingress validation policy toggles
+rfc9171-validity:
+  primary-block-integrity: false # Set false for interoperability with dtn-android-messenger / dtn7-rs
+  bundle-age-required: false
 "#;
 
 #[tokio::main]

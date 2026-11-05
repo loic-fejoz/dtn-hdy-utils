@@ -1,12 +1,14 @@
 import { h } from 'preact';
 
 interface NavbarProps {
-  activeTab: 'config' | 'bundles' | 'send';
-  onTabChange: (tab: 'config' | 'bundles' | 'send') => void;
+  activeTab: 'config' | 'chat' | 'files' | 'bundles' | 'send';
+  onTabChange: (tab: 'config' | 'chat' | 'files' | 'bundles' | 'send') => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   stationCallsign?: string;
   nodeId?: string;
+  unreadChatCount?: number;
+  unreadFilesCount?: number;
 }
 
 export function Navbar({
@@ -16,6 +18,8 @@ export function Navbar({
   onToggleDarkMode,
   stationCallsign,
   nodeId,
+  unreadChatCount = 0,
+  unreadFilesCount = 0,
 }: NavbarProps) {
   return (
     <header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm sticky top-0 z-30">
@@ -58,6 +62,40 @@ export function Navbar({
           >
             <span>⚙️</span>
             <span>Configuration</span>
+          </button>
+
+          <button
+            onClick={() => onTabChange('chat')}
+            class={`px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center space-x-2 relative ${
+              activeTab === 'chat'
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+            }`}
+          >
+            <span>💬</span>
+            <span>Chat</span>
+            {unreadChatCount > 0 && (
+              <span class="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-white bg-emerald-600 rounded-full shadow-sm ml-1">
+                {unreadChatCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => onTabChange('files')}
+            class={`px-3 sm:px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center space-x-2 relative ${
+              activeTab === 'files'
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+            }`}
+          >
+            <span>📁</span>
+            <span>Files</span>
+            {unreadFilesCount > 0 && (
+              <span class="inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold leading-none text-white bg-emerald-600 rounded-full shadow-sm ml-1">
+                {unreadFilesCount}
+              </span>
+            )}
           </button>
 
           <button

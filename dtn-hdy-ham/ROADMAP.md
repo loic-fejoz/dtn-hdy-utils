@@ -19,16 +19,18 @@ By combining `dtn-hdy-ham`'s high-performance in-process Rust BPA (`hardy`), its
 | Feature / Domain | `dtn-android-messenger` (Kotlin/Compose) | `dtn-hdy-ham` Current State | Target in `dtn-hdy-ham` Web Console |
 | :--- | :--- | :--- | :--- |
 | **Configuration Dashboard** | Read/write settings in SQLite Room DB | **Delivered (WP1)**: Read-only active config cards & JSON inspector | WP6: Add interactive runtime configuration |
-| **Generic Bundle Sending** | Dedicated screen for text & files | **Delivered (WP1)**: REST API & Form for text and file attachments | WP2: Enhanced with BPSec flags & preview |
-| **Bundle Storage & Inspection** | Registry of all bundles (inbox, outbox, delivered) + detail view | BPA storage only (no web listing) | **WP2**: Tabbed bundle list, metadata inspector, payload renderers |
-| **Payload Renderers** | Auto-detects Text, Markdown, Image, Audio, Hex | Raw payload download only | **WP2**: In-browser Markdown, Image viewer, Audio player, Hex viewer |
-| **Chat Service** | Conversational bubble thread grouped by peer | Generic sending only | **WP3**: Conversational thread UI, auto-reply, chat bubbles, unread tracking |
+| **Generic Bundle Sending** | Dedicated screen for text & files | **Delivered (WP1/WP7)**: REST API & Form for text, file attachments & voice notes | Enhanced with BPSec flags & preview |
+| **Bundle Storage & Inspection** | Registry of all bundles (inbox, outbox, delivered) + detail view | **Delivered (WP2)**: Storage listing, metadata inspector, hex dump & multi-format preview | Complete parity with mobile app (ADR 0011) |
+| **Payload Renderers** | Auto-detects Text, Markdown, Image, Audio, Hex | **Delivered (WP2)**: In-browser Markdown, Image viewer, Audio player, Hex viewer | Complete parity with mobile app |
+| **Chat Service** | Conversational bubble thread grouped by peer | **Delivered (WP3)**: Conversational thread UI, chat bubbles, unread tracking, persistent DB | Complete parity with mobile app (ADR 0012) |
+| **Files Service & Retention** | File explorer & sticky retention | **Delivered**: Built-in files service (`/files`), sticky flag, metadata DB, auto-cleanup | Complete parity with mobile app (ADR 0013) |
+| **Voice Notes & Audio Recording** | Native Opus audio recorder | **Delivered (WP7)**: In-browser Web Audio mic recorder + Ogg/Opus auto-remux | Complete parity with mobile app |
 | **Real-Time Push / Updates** | Reactive Room DB Kotlin Flows | Manual refresh / polling required | **WP4**: WebSocket / Server-Sent Events (SSE) for live event streaming |
 | **System Event Logs** | Dedicated `SystemLogScreen` | Terminal logs only | **WP4**: Web-based real-time log viewer with filter & search |
 | **SenML Telemetry** | `SENML_LAST` cards & `SENML_GRAPH` time series | None | **WP5**: RFC 8428 SenML decoder, sensor card dashboard & historical charts |
-| **Service Registry** | Dynamic registration of local EIDs & Viewer Types | Static YAML config only | **WP6**: Register/deregister services with UI viewer binding |
+| **Service Registry** | Dynamic registration of local EIDs & Viewer Types | Static YAML config + Service Tracker | **WP6**: Register/deregister services with UI viewer binding |
 | **Static Routing & BPSec** | Rule editor + BIB key management | YAML config only | **WP6**: Route manager + BIB key vault & verification policy |
-| **Mobile & Field Ergonomics** | Native Android APK | Web responsive layout | **WP7**: Progressive Web App (PWA) offline install & mic audio recorder |
+| **Mobile & Field Ergonomics** | Native Android APK | Web responsive layout + mic recording | **WP7**: Progressive Web App (PWA) offline install & touch layout |
 
 ---
 
@@ -92,43 +94,67 @@ flowchart TD
 
 ---
 
-### Phase 2: Bundle Storage Inspector & Multi-Format Viewer (`BUNDLE_LIST`)
-> **Goal**: Enable operators to inspect, filter, and view incoming, outgoing, and delivered bundles, with rich rendering of payloads matching `dtn-android-messenger`'s `BundleListScreen` and `PayloadUtils`.
+### Phase 2: Bundle Storage Inspector & Multi-Format Viewer (`BUNDLE_LIST`) (Completed)
+> **Goal**: Enable operators to inspect, filter, and view incoming, outgoing, and delivered bundles, with rich rendering of payloads matching `dtn-android-messenger`'s `BundleListScreen` and `PayloadUtils` (ADR 0011).
 
 #### Deliverables:
-1. **Backend Endpoints (`/api/v1/bundles`)**:
+1. [x] **Backend Endpoints (`/api/v1/bundles`)**:
    * `GET /api/v1/bundles`: List stored bundles with filtering by state (`inbox`, `outbox`, `delivered`), search query, and pagination.
-   * `GET /api/v1/bundles/{bundle_id}`: Detailed metadata (Primary block, hop count, BPSec status, lifetime, creation timestamp).
-   * `GET /api/v1/bundles/{bundle_id}/payload`: Raw payload stream with MIME type inference (`content-type`).
-   * `DELETE /api/v1/bundles/{bundle_id}`: Remove bundle from storage.
-2. **Payload Type Detection Engine (Rust)**:
-   * Inspect first bytes and extension: detect Plain text, Markdown, Images (PNG, JPEG, GIF, WebP), Audio (WAV, MP3, OGG vocal notes), and SenML.
-3. **Frontend UI Components (`dtn-hdy-ham/web`)**:
-   * **Bundle List View**: Tabbed list (Inbox, Outbox, Delivered), status badges, search bar, and size indicators.
+   * `GET /api/v1/bundles?id=...`: Detailed metadata (Primary block, hop count, lifetime, creation timestamp, hex dump, preview).
+   * `GET /api/v1/bundles/payload`: Raw payload stream with MIME type inference (`content-type`) and HTTP Range support.
+   * `DELETE /api/v1/bundles?id=...`: Remove bundle from storage.
+2. [x] **Payload Type Detection Engine (Rust)**:
+   * Inspect first bytes and extension: detect Plain text, Markdown, Images (PNG, JPEG, GIF, WebP), Audio (WAV, MP3, OGG Opus vocal notes), and SenML.
+3. [x] **Frontend UI Components (`dtn-hdy-ham/web`)**:
+   * **Bundle List View**: Tabbed list (All, Inbox, Outbox, Delivered), status badges, search bar, and size indicators.
    * **Bundle Detail Modal/Drawer**:
      * Header metadata cards with copyable EIDs and timestamps.
      * **Markdown Renderer**: Sanitized GitHub-flavored markdown view.
      * **Image Viewer**: Responsive image preview with zoom and download.
-     * **Audio Player**: HTML5 audio player for vocal notes.
+     * **Audio Player**: HTML5 audio player for vocal notes with multi-source fallback.
      * **Hex Viewer**: Byte-by-byte hex/ASCII dump for arbitrary binary data.
 
 ---
 
-### Phase 3: Dedicated Interactive Chat Service (`CHAT`)
-> **Goal**: Provide a real-time messaging interface similar to instant messengers, structured around conversations with peer stations.
+### Phase 3: Dedicated Interactive Chat Service (`CHAT`) (Completed)
+> **Goal**: Provide a real-time messaging interface similar to instant messengers, structured around conversations with peer stations (ADR 0012).
 
 #### Deliverables:
-1. **Backend Chat Aggregator (`/api/v1/chat`)**:
-   * Sieve bundles destined for or sent by local chat endpoints (e.g. `dtn://<callsign>/chat`).
-   * Group messages into threads indexed by correspondent node EID (e.g. `dtn://statb`).
+1. [x] **Backend Chat Service & Storage (`/api/v1/chat`)**:
+   * Sieve and deliver bundles destined for local chat endpoints (`dtn://<callsign>/chat`).
+   * Group messages into persistent threads indexed by correspondent node EID (e.g. `dtn://statb/chat`).
+   * Persistent SQLite storage (`chat.db`) surviving daemon restarts.
    * `GET /api/v1/chat/conversations`: List active conversation partners, last message snippet, timestamp, and unread counts.
-   * `GET /api/v1/chat/conversations/{peer_eid}`: Chronological message history for a conversation.
-   * `POST /api/v1/chat/conversations/{peer_eid}`: Send quick text or attachment addressed to `dtn://<peer>/chat`.
-2. **Frontend Chat Interface**:
-   * Dual-pane layout (conversations sidebar + chat bubble thread).
-   * Visual delivery indicators: *Queued in Outbox* ⏳, *Sent via CLA* 📤, *Delivered* ✅.
-   * BPSec authenticity badges: *Verified* 🔒, *Unsigned* ⚠️.
-   * Instant reply box with drag-and-drop image/file attachment and quick emojis.
+   * `GET /api/v1/chat/messages?peer={peer_eid}`: Chronological message history for a conversation.
+   * `POST /api/v1/chat/messages`: Send quick text message addressed to `dtn://<peer>/chat`.
+   * `POST /api/v1/chat/conversations`: Create a new conversation explicitly.
+   * `POST /api/v1/chat/read`: Mark conversation messages as read.
+2. [x] **Frontend Chat Interface (`ChatView.tsx`)**:
+   * Dual-pane responsive layout (conversations sidebar + chat bubble thread).
+   * Navbar unread counter badge.
+   * Visual delivery indicators: *Outbox* ⏳, *Sent* 📤, *Delivered* ✅.
+   * New Chat modal dialog with autocomplete suggestions from active peers/routes.
+
+---
+
+### Phase 3bis: Dedicated Internal Files Service & Retention (`BUNDLE_LIST`) (Completed)
+> **Goal**: Deliver a permanent, isolated file transfer endpoint on `dtn://<node>/files` with persistent SQLite indexing, HTTP Range streaming, and sticky retention (ADR 0013).
+
+#### Deliverables:
+1. [x] **Built-in Files Service Engine (`files_service.rs`)**:
+   * Registers `dtn://<node>/files` with BPA on startup and stays permanently bound.
+   * Stores payload files on disk (`files/`) and tracks metadata in SQLite (`files.db`).
+   * Automatic background reaper purging expired non-sticky bundles.
+2. [x] **REST API Endpoints (`/api/v1/files`)**:
+   * `GET /api/v1/files`: List received file bundles with unread and sticky flags.
+   * `GET /api/v1/files/{id}`: Detailed metadata with payload preview and missing-file degraded state detection.
+   * `GET /api/v1/files/{id}/payload`: Streaming payload with RFC 9110 HTTP Range support (partial content `206` and suffix ranges).
+   * `POST /api/v1/files/{id}/sticky`: Toggle permanent retention flag.
+   * `DELETE /api/v1/files/{id}`: Delete file bundle and physical disk payload.
+3. [x] **Frontend File Explorer (`FilesView.tsx`)**:
+   * Searchable table view with sticky pin icons, unread badges, and sorting.
+   * Detail view (Level 2) rendering Markdown, embedded images, audio player, or hex dump.
+   * Reply button pre-filling the Generic Bundle Dispatcher.
 
 ---
 
@@ -197,9 +223,11 @@ flowchart TD
    * Web App Manifest (`manifest.json`) with standalone display mode, app icons, and theme color.
    * Service worker caching frontend static assets for instant offline loading.
 2. **Field Ergonomics & Audio Notes**:
-   * Web Audio API recorder: record voice clips directly from the browser microphone and send as audio bundles (`dtn://<peer>/chat`).
+   * [x] In-browser microphone voice recorder in the Generic Bundle Dispatcher (`SendBundleView.tsx`).
+   * [x] Multi-source HTML5 audio preview before dispatching.
+   * [x] Automatic lossless remuxing of WebM/Opus to pure RFC 7845 Ogg/Opus on backend injection.
+   * [x] High-contrast dark and light mode themes toggleable in navbar.
    * Mobile touch-friendly gesture controls and bottom navigation bar on small screens.
-   * High-contrast night-mode color palette optimized for amateur radio portable setups.
 
 ---
 

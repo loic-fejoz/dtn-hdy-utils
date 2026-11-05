@@ -38,6 +38,8 @@ pub enum ServiceEvent {
     ServicesUpdate { services: Vec<ServiceInfo> },
     #[serde(rename = "bundles_update")]
     BundlesUpdate,
+    #[serde(rename = "chat_message")]
+    ChatMessage { message: serde_json::Value },
 }
 
 /// Generates an ISO 8601 timestamp with local timezone offset (or UTC fallback).
@@ -129,6 +131,16 @@ impl ServiceTracker {
     /// Broadcasts a bundles changed notification over SSE.
     pub fn broadcast_bundles_update(&self) {
         let _ = self.tracker.tx.send(ServiceEvent::BundlesUpdate);
+    }
+
+    /// Broadcasts an incoming or outgoing chat message event over SSE.
+    pub fn broadcast_chat_message(&self, message: impl Serialize) {
+        if let Ok(val) = serde_json::to_value(message) {
+            let _ = self
+                .tracker
+                .tx
+                .send(ServiceEvent::ChatMessage { message: val });
+        }
     }
 
     /// Helper to register a service with a custom type label.

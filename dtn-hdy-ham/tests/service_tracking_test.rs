@@ -90,11 +90,12 @@ async fn test_active_services_tracking_and_grpc_lifecycle() {
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let svcs: Vec<serde_json::Value> = res.json().await.expect("valid JSON response");
 
-    // Permanent Echo service should always be active
-    assert_eq!(svcs.len(), 1);
-    assert_eq!(svcs[0]["eid"], "dtn://f4test/echo");
-    assert_eq!(svcs[0]["type"], "Built-in Echo");
-    assert!(svcs[0]["registered_at"].as_str().is_some());
+    // Permanent Echo, Chat, and Files services should always be active
+    assert_eq!(svcs.len(), 3);
+    let initial_eids: Vec<&str> = svcs.iter().filter_map(|s| s["eid"].as_str()).collect();
+    assert!(initial_eids.contains(&"dtn://f4test/echo"));
+    assert!(initial_eids.contains(&"dtn://f4test/chat"));
+    assert!(initial_eids.contains(&"dtn://f4test/files"));
 
     // Connect remote service via gRPC (simulating dtnprint)
     let remote_bpa = RemoteBpa::new("http://127.0.0.1:54321".to_string());
@@ -120,10 +121,12 @@ async fn test_active_services_tracking_and_grpc_lifecycle() {
         .await
         .expect("services request should succeed");
     let svcs2: Vec<serde_json::Value> = res2.json().await.expect("valid JSON response");
-    assert_eq!(svcs2.len(), 2);
+    assert_eq!(svcs2.len(), 4);
 
     let eids: Vec<&str> = svcs2.iter().filter_map(|s| s["eid"].as_str()).collect();
     assert!(eids.contains(&"dtn://f4test/echo"));
+    assert!(eids.contains(&"dtn://f4test/chat"));
+    assert!(eids.contains(&"dtn://f4test/files"));
     assert!(eids.contains(&"dtn://f4test/incoming"));
 
     let incoming_svc = svcs2
@@ -140,15 +143,18 @@ async fn test_active_services_tracking_and_grpc_lifecycle() {
     // Wait a brief moment for unregistration to propagate
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Verify incoming service is gone and only echo remains
+    // Verify incoming service is gone and only echo + chat + files remain
     let res3 = client
         .get("http://127.0.0.1:8888/api/v1/services")
         .send()
         .await
         .expect("services request should succeed");
     let svcs3: Vec<serde_json::Value> = res3.json().await.expect("valid JSON response");
-    assert_eq!(svcs3.len(), 1);
-    assert_eq!(svcs3[0]["eid"], "dtn://f4test/echo");
+    assert_eq!(svcs3.len(), 3);
+    let final_eids: Vec<&str> = svcs3.iter().filter_map(|s| s["eid"].as_str()).collect();
+    assert!(final_eids.contains(&"dtn://f4test/echo"));
+    assert!(final_eids.contains(&"dtn://f4test/chat"));
+    assert!(final_eids.contains(&"dtn://f4test/files"));
 
     s_handle.abort();
 }

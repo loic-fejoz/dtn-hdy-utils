@@ -35,9 +35,9 @@ test.describe('Send Bundle View', () => {
   });
 
   test('navigates to send bundle tab and shows default station placeholders', async ({ page }) => {
-    const sourceInput = page.getByPlaceholder('dtn://f4jxq/');
+    const sourceInput = page.getByPlaceholder('dtn://f4jxq/files');
     await expect(sourceInput).toBeVisible();
-    await expect(sourceInput).toHaveValue('dtn://f4jxq/');
+    await expect(sourceInput).toHaveValue('dtn://f4jxq/files');
 
     const destInput = page.getByPlaceholder('dtn://statb/incoming or ipn:2.1');
     await expect(destInput).toBeVisible();
@@ -59,7 +59,7 @@ test.describe('Send Bundle View', () => {
           body: JSON.stringify({
             status: 'sent',
             bundle_id: 'bundle://f4jxq/1730718000/0',
-            source: 'dtn://f4jxq/',
+            source: 'dtn://f4jxq/files',
             destination: 'dtn://f1xyz/bulletin',
             payload_size: 33,
             lifetime_secs: 3600,
@@ -77,7 +77,7 @@ test.describe('Send Bundle View', () => {
 
     // Verify request payload was formatted correctly
     expect(interceptedRequestBody).toEqual({
-      source: 'dtn://f4jxq/',
+      source: 'dtn://f4jxq/files',
       destination: 'dtn://f1xyz/bulletin',
       lifetime: 3600,
       payload: '73 de F4JXQ - CQ DTN test over VHF',
@@ -87,7 +87,7 @@ test.describe('Send Bundle View', () => {
     await expect(page.getByText('Bundle Successfully Dispatched')).toBeVisible();
     await expect(page.getByText('SENT')).toBeVisible();
     await expect(page.getByText('bundle://f4jxq/1730718000/0')).toBeVisible();
-    await expect(page.getByText('From (Sender): dtn://f4jxq/')).toBeVisible();
+    await expect(page.getByText('From (Sender): dtn://f4jxq/files')).toBeVisible();
     await expect(page.getByText('To (Destinator): dtn://f1xyz/bulletin')).toBeVisible();
   });
 
@@ -100,7 +100,7 @@ test.describe('Send Bundle View', () => {
         body: JSON.stringify({
           status: 'sent',
           bundle_id: 'bundle://f4jxq/1730718000/42',
-          source: 'dtn://f4jxq/',
+          source: 'dtn://f4jxq/files',
           destination: 'dtn://f1xyz/bulletin',
           payload_size: 10,
           lifetime_secs: 3600,
@@ -135,7 +135,7 @@ test.describe('Send Bundle View', () => {
           body: JSON.stringify({
             status: 'sent',
             bundle_id: 'bundle://f4jxq/1730718100/99',
-            source: 'dtn://f4jxq/',
+            source: 'dtn://f4jxq/files',
             destination: 'dtn://f1xyz/files',
             payload_size: 512,
             lifetime_secs: 7200,
@@ -176,6 +176,27 @@ test.describe('Send Bundle View', () => {
     await page.getByRole('button', { name: 'Transmit Bundle' }).click();
 
     await expect(page.getByText('Please enter a text message payload')).toBeVisible();
+  });
+
+  test('switches to voice note mode and displays recording controls', async ({ page }) => {
+    // Switch to voice mode
+    await page.getByRole('button', { name: 'Voice Note / Audio' }).click();
+
+    await expect(page.getByText('Voice Note (Opus Audio)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start Voice Recording' })).toBeVisible();
+    await expect(
+      page.getByText('High-efficiency Opus voice note compatible with dtn-android-messenger')
+    ).toBeVisible();
+  });
+
+  test('displays validation error if voice note is not recorded before transmitting', async ({ page }) => {
+    await page.getByPlaceholder('dtn://statb/incoming or ipn:2.1').fill('dtn://statb/incoming');
+    await page.getByRole('button', { name: 'Voice Note / Audio' }).click();
+
+    // Click transmit without recording
+    await page.getByRole('button', { name: 'Transmit Bundle' }).click();
+
+    await expect(page.getByText('Please record a voice note before transmitting')).toBeVisible();
   });
 
   test('displays transmission failed banner when API returns error', async ({ page }) => {

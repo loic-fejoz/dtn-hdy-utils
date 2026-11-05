@@ -1,8 +1,9 @@
 import { h } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 
 interface SendBundleViewProps {
   stationNodeId?: string;
+  stationCallsign?: string;
   defaultDestination?: string;
 }
 
@@ -15,20 +16,172 @@ interface SendResult {
   lifetime_secs: number;
 }
 
-export function SendBundleView({ stationNodeId, defaultDestination }: SendBundleViewProps) {
-  const [source, setSource] = useState(stationNodeId || '');
+export function computeDefaultFilesSource(nodeId?: string, callsign?: string): string {
+  if (callsign && callsign.trim()) {
+    return `dtn://${callsign.trim().toLowerCase()}/files`;
+  }
+  if (nodeId && nodeId.trim()) {
+    const base = nodeId.trim().replace(/\/+$/, '');
+    return `${base}/files`;
+  }
+  return '';
+}
+
+function formatRecordingTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+export function SendBundleView({
+  stationNodeId,
+  stationCallsign,
+  defaultDestination,
+}: SendBundleViewProps) {
+  const defaultSource = computeDefaultFilesSource(stationNodeId, stationCallsign);
+  const [source, setSource] = useState(defaultSource);
   const [destination, setDestination] = useState(defaultDestination || '');
   const [lifetime, setLifetime] = useState('3600');
-  const [mode, setMode] = useState<'text' | 'file'>('text');
+  const [mode, setMode] = useState<'text' | 'file' | 'voice'>('text');
   const [textPayload, setTextPayload] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  // Sync default station node ID into source field when config is loaded
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // Cleanup on unmount or URL change
   useEffect(() => {
-    if (stationNodeId && !source) {
-      setSource(stationNodeId);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+    };
+  }, [audioUrl]);
+
+  const startRecording = async () => {
+    try {
+      setRecordingError(null);
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Microphone audio recording is not supported in this browser environment');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      let mimeType = '';
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) {
+        if (MediaRecorder.isTypeSupported('audio/ogg; codecs=opus')) {
+          mimeType = 'audio/ogg; codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
+        } else if (MediaRecorder.isTypeSupported('audio/webm; codecs=opus')) {
+          mimeType = 'audio/webm; codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
+        }
+      }
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const effectiveMime = recorder.mimeType || mimeType || 'audio/ogg';
+        const blob = new Blob(audioChunksRef.current, { type: effectiveMime });
+        setRecordedBlob(blob);
+        if (audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+        }
+        const url = URL.createObjectURL(blob);
+        setAudioUrl(url);
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+      };
+
+      recorder.start(250);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      const timer = window.setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+      timerRef.current = timer;
+    } catch (err: any) {
+      setRecordingError(err.message || 'Microphone access denied or unavailable');
     }
-  }, [stationNodeId]);
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setIsRecording(false);
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.stop();
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingDuration(0);
+    audioChunksRef.current = [];
+  };
+
+  const resetVoice = () => {
+    cancelRecording();
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    setRecordedBlob(null);
+    setRecordingDuration(0);
+  };
+
+  // Sync default station files service endpoint into source field when config is loaded
+  useEffect(() => {
+    const computed = computeDefaultFilesSource(stationNodeId, stationCallsign);
+    if (computed && (!source || source === stationNodeId)) {
+      setSource(computed);
+    }
+  }, [stationNodeId, stationCallsign]);
+
+  // Sync default destination when passed from external navigation (e.g. Reply)
+  useEffect(() => {
+    if (defaultDestination) {
+      setDestination(defaultDestination);
+    }
+  }, [defaultDestination]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,10 +208,41 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
       return;
     }
 
+    if (mode === 'voice' && !recordedBlob) {
+      setError('Please record a voice note before transmitting');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      if (mode === 'file' && selectedFile) {
+      if (mode === 'voice' && recordedBlob) {
+        // Voice note multipart send
+        const isOgg = recordedBlob.type.includes('ogg');
+        const ext = isOgg ? 'ogg' : 'webm';
+        const filename = `voice_note_${Date.now()}.${ext}`;
+
+        const formData = new FormData();
+        formData.append('destination', destination.trim());
+        if (source.trim()) {
+          formData.append('source', source.trim());
+        }
+        if (lifetime.trim()) {
+          formData.append('lifetime', lifetime.trim());
+        }
+        formData.append('file', recordedBlob, filename);
+
+        const res = await fetch('/api/v1/bundles', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        setResult(data);
+      } else if (mode === 'file' && selectedFile) {
         // Multipart send
         const formData = new FormData();
         formData.append('destination', destination.trim());
@@ -130,7 +314,7 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
                 Generic Bundle Dispatcher
               </h2>
               <p class="text-sm text-slate-500 dark:text-slate-400">
-                Compose text messages or transmit files across the amateur radio DTN network
+                Compose text messages, transmit files, or send voice notes across the amateur radio DTN network
               </p>
             </div>
           </div>
@@ -147,11 +331,12 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
               type="text"
               value={source}
               onInput={(e) => setSource((e.target as HTMLInputElement).value)}
-              placeholder={stationNodeId || 'dtn://station/ or ipn:1.0'}
+              placeholder={defaultSource || 'dtn://<callsign>/files'}
               class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
             />
             <p class="mt-1.5 text-xs text-slate-400">
-              The transmitting node or service endpoint. Automatically defaults to local station node: <span class="font-mono">{stationNodeId || 'station node'}</span>
+              The transmitting node or service endpoint. Automatically defaults to station files service:{' '}
+              <span class="font-mono">{defaultSource || 'dtn://<callsign>/files'}</span>
             </p>
           </div>
 
@@ -218,6 +403,17 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
               >
                 📎 Binary / File Attachment
               </button>
+              <button
+                type="button"
+                onClick={() => setMode('voice')}
+                class={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  mode === 'voice'
+                    ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                🎙️ Voice Note / Audio
+              </button>
             </div>
           </div>
 
@@ -238,7 +434,7 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
                 {new Blob([textPayload]).size} bytes (UTF-8)
               </div>
             </div>
-          ) : (
+          ) : mode === 'file' ? (
             <div>
               <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
                 Select File
@@ -275,6 +471,96 @@ export function SendBundleView({ stationNodeId, defaultDestination }: SendBundle
                     >
                       ✕
                     </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
+                Voice Note (Opus Audio)
+              </label>
+
+              {recordingError && (
+                <div class="mb-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300 flex items-center space-x-2">
+                  <span>⚠️</span>
+                  <span>{recordingError}</span>
+                </div>
+              )}
+
+              <div class="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-2xl p-6 text-center hover:border-emerald-500 dark:hover:border-emerald-400 transition bg-slate-50/50 dark:bg-slate-900/40">
+                {isRecording ? (
+                  /* Active Recording State */
+                  <div class="flex flex-col items-center space-y-4">
+                    <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 text-xs font-bold animate-pulse">
+                      <span class="w-2.5 h-2.5 rounded-full bg-red-600 dark:red-400" />
+                      <span>RECORDING LIVE</span>
+                    </div>
+
+                    <div class="text-3xl font-mono font-bold text-slate-800 dark:text-slate-100">
+                      {formatRecordingTime(recordingDuration)}
+                    </div>
+
+                    <p class="text-xs text-slate-500 dark:text-slate-400">
+                      Speak clearly into your microphone...
+                    </p>
+
+                    <div class="flex items-center space-x-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={stopRecording}
+                        class="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow flex items-center space-x-2 transition"
+                      >
+                        <span>⏹️</span>
+                        <span>Stop Recording</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelRecording}
+                        class="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-xs transition"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : recordedBlob && audioUrl ? (
+                  /* Recorded Audio Preview State */
+                  <div class="flex flex-col items-center space-y-4">
+                    <div class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+                      <span>✓</span>
+                      <span>Audio Captured</span>
+                    </div>
+
+                    <audio controls src={audioUrl} class="w-full max-w-md" />
+
+                    <div class="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                      {(recordedBlob.size / 1024).toFixed(1)} KB · {formatRecordingTime(recordingDuration)} · {recordedBlob.type.includes('ogg') ? 'audio/ogg (Opus)' : 'audio/webm (Remuxed to Ogg on dispatch)'}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={resetVoice}
+                      class="px-4 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center space-x-1.5 transition"
+                    >
+                      <span>🔄</span>
+                      <span>Discard & Record Again</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* Initial Idle State */
+                  <div class="flex flex-col items-center">
+                    <span class="text-4xl mb-3">🎙️</span>
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white font-bold text-sm shadow-md flex items-center space-x-2 transition"
+                    >
+                      <span>🔴</span>
+                      <span>Start Voice Recording</span>
+                    </button>
+                    <span class="text-xs text-slate-400 mt-2">
+                      High-efficiency Opus voice note compatible with dtn-android-messenger
+                    </span>
                   </div>
                 )}
               </div>

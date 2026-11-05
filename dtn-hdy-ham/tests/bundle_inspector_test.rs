@@ -55,11 +55,15 @@ async fn test_bundle_inspector_endpoints_and_lifecycle() {
     let injector = server.web_injector().expect("injector configured");
     let service_tracker = server.service_tracker();
     let cla_manager = server.cla_manager();
+    let chat_manager = server.chat_manager();
+    let internal_storage = server.internal_storage();
     let state = AppState {
         config: Arc::new(server.config().clone()),
         injector,
         service_tracker: service_tracker.clone(),
         cla_manager,
+        chat_manager,
+        internal_storage,
     };
     let app = create_router(state);
 
@@ -270,11 +274,15 @@ async fn test_in_memory_bundle_inspector_and_connect_peer() {
     let injector = server.web_injector().expect("injector configured");
     let service_tracker = server.service_tracker();
     let cla_manager = server.cla_manager();
+    let chat_manager = server.chat_manager();
+    let internal_storage = server.internal_storage();
     let state = AppState {
         config: Arc::new(server.config().clone()),
         injector,
         service_tracker: service_tracker.clone(),
         cla_manager,
+        chat_manager,
+        internal_storage,
     };
     let app = create_router(state);
 

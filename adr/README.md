@@ -15,4 +15,6 @@ This directory contains records of the major architectural and design decisions 
 9. [ADR 9: Axum Web Server and Preact UI for `dtn-hdy-ham`](0009-axum-web-server-and-preact-ui.md)
 10. [ADR 10: Active DTN Services Tracking and Real-Time SSE Dashboard for `dtn-hdy-ham`](0010-active-services-tracking-and-sse.md)
 11. [ADR 11: Bundle Storage Inspector & Multi-Format Viewer for `dtn-hdy-ham`](0011-bundle-storage-inspector-and-viewer.md)
+12. [ADR 12: Dedicated Interactive Chat Service for `dtn-hdy-ham`](0012-dedicated-interactive-chat-service.md)
+13. [ADR 13: Dedicated Internal Files Service, BUNDLE_LIST Viewer & Sticky Retention Policy](0013-internal-files-service-and-sticky-retention.md)
 

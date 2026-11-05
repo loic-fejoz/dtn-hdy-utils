@@ -36,6 +36,10 @@ pub async fn sse_events(
             Ok(ServiceEvent::BundlesUpdate) => {
                 Some(Ok(Event::default().event("bundles_update").data("{}")))
             }
+            Ok(ServiceEvent::ChatMessage { message }) => {
+                let data = serde_json::to_string(&message).unwrap_or_default();
+                Some(Ok(Event::default().event("chat_message").data(data)))
+            }
             Err(_) => None,
         }
     });

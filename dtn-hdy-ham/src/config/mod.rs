@@ -44,6 +44,10 @@ pub struct HamConfig {
 
     /// Static routing definitions.
     pub routes: Vec<RouteConfig>,
+
+    /// RFC 9171 ingress validation policy toggles.
+    #[serde(default)]
+    pub rfc9171_validity: Option<Rfc9171ValidityConfig>,
 }
 
 impl Default for HamConfig {
@@ -57,6 +61,29 @@ impl Default for HamConfig {
             web: None,
             clas: Vec::new(),
             routes: Vec::new(),
+            rfc9171_validity: Some(Rfc9171ValidityConfig::default()),
+        }
+    }
+}
+
+/// RFC 9171 ingress validation toggles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct Rfc9171ValidityConfig {
+    /// Require CRC or BIB on the primary block.
+    /// In amateur radio context, defaults to `Some(false)` for out-of-the-box interoperability
+    /// with implementations (e.g. dtn-android-messenger / dtn7-rs) that do not generate a primary block CRC.
+    pub primary_block_integrity: Option<bool>,
+
+    /// Require a Bundle Age block when the creation time has no clock.
+    pub bundle_age_required: Option<bool>,
+}
+
+impl Default for Rfc9171ValidityConfig {
+    fn default() -> Self {
+        Self {
+            primary_block_integrity: Some(false),
+            bundle_age_required: Some(false),
         }
     }
 }

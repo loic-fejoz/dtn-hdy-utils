@@ -33,6 +33,42 @@ fn normalize_eid(s: &str) -> String {
     s.to_string()
 }
 
+/// If the payload is a WebM audio stream, attempts to remux it to Ogg Opus using ffmpeg if available.
+pub fn maybe_remux_webm_to_ogg(payload: Vec<u8>) -> Vec<u8> {
+    // Matroska / WebM signature: 0x1A 0x45 0xDF 0xA3
+    if payload.len() >= 4 && &payload[0..4] == b"\x1A\x45\xDF\xA3" {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let mut child = match Command::new("ffmpeg")
+            .args([
+                "-y", "-v", "error", "-i", "pipe:0", "-c:a", "copy", "-f", "ogg", "pipe:1",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(_) => return payload,
+        };
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let payload_clone = payload.clone();
+            std::thread::spawn(move || {
+                let _ = stdin.write_all(&payload_clone);
+            });
+        }
+
+        if let Ok(output) = child.wait_with_output() {
+            if output.status.success() && !output.stdout.is_empty() {
+                return output.stdout;
+            }
+        }
+    }
+    payload
+}
+
 async fn build_and_inject_bundle(
     state: &AppState,
     destination_str: &str,
@@ -40,6 +76,7 @@ async fn build_and_inject_bundle(
     lifetime_secs: Option<u64>,
     payload_bytes: Vec<u8>,
 ) -> Result<serde_json::Value, (StatusCode, String)> {
+    let payload_bytes = maybe_remux_webm_to_ogg(payload_bytes);
     if destination_str.trim().is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -64,11 +101,17 @@ async fn build_and_inject_bundle(
             )
         })?
     } else {
-        let norm_src = normalize_eid(&state.config.node_id);
+        let default_source = if let Some(cs) = &state.config.callsign {
+            format!("dtn://{}/files", cs.to_lowercase())
+        } else {
+            let base = state.config.node_id.trim_end_matches('/');
+            format!("{base}/files")
+        };
+        let norm_src = normalize_eid(&default_source);
         norm_src.parse().map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Invalid station node-id '{norm_src}': {e}"),
+                format!("Invalid station files endpoint '{norm_src}': {e}"),
             )
         })?
     };
@@ -212,13 +255,14 @@ pub async fn send_bundle(State(state): State<AppState>, request: Request) -> imp
 }
 
 use axum::extract::Query;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::http::HeaderMap;
 use axum::response::Response;
 
 /// Query parameters for bundle operations.
 #[derive(Debug, Deserialize)]
 pub struct BundleQuery {
     pub id: Option<String>,
+    pub download: Option<bool>,
 }
 
 /// Handler for `GET /api/v1/bundles` - Lists stored bundles, or a single bundle detail if ?id=... is given.
@@ -259,6 +303,7 @@ pub async fn list_bundles(
 pub async fn get_bundle_payload_handler(
     State(state): State<AppState>,
     Query(query): Query<BundleQuery>,
+    req_headers: HeaderMap,
 ) -> Response {
     let Some(id) = query.id else {
         return (
@@ -272,18 +317,13 @@ pub async fn get_bundle_payload_handler(
     let payload_dir = state.config.storage.effective_payload_dir();
 
     match crate::bundle_inspector::get_bundle_payload(&db_path, &payload_dir, &id).await {
-        Ok(Some((bytes, mime))) => (
-            StatusCode::OK,
-            [
-                (CONTENT_TYPE, mime),
-                (
-                    CONTENT_DISPOSITION,
-                    "inline; filename=\"bundle_payload.bin\"",
-                ),
-            ],
-            bytes,
-        )
-            .into_response(),
+        Ok(Some((bytes, mime))) => super::serve_payload_with_range(
+            bytes.into(),
+            mime,
+            "bundle_payload.bin",
+            query.download.unwrap_or(false),
+            &req_headers,
+        ),
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "Bundle or payload not found" })),

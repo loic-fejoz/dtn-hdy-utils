@@ -103,6 +103,9 @@ clas:
 routes:
   - pattern: "dtn://*/*"
     cla: "tcpcl-44net-gateway"
+rfc9171-validity:
+  primary-block-integrity: false
+  bundle-age-required: true
 "#;
 
     let dir = tempfile::tempdir().unwrap();
@@ -114,6 +117,9 @@ routes:
     assert_eq!(config.admin_endpoints, vec!["ipn:1.0"]);
     assert_eq!(config.clas.len(), 3);
     assert_eq!(config.routes.len(), 1);
+    let rfc = config.rfc9171_validity.expect("rfc9171 should parse");
+    assert_eq!(rfc.primary_block_integrity, Some(false));
+    assert_eq!(rfc.bundle_age_required, Some(true));
 }
 
 #[test]
@@ -197,11 +203,15 @@ async fn test_ham_web_api_routes() {
     let injector = server.web_injector().expect("injector configured");
     let service_tracker = server.service_tracker();
     let cla_manager = server.cla_manager();
+    let chat_manager = server.chat_manager();
+    let internal_storage = server.internal_storage();
     let state = AppState {
         config: Arc::new(config),
         injector,
         service_tracker: service_tracker.clone(),
         cla_manager,
+        chat_manager,
+        internal_storage,
     };
     let app = create_router(state);
 
