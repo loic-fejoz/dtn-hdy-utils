@@ -128,6 +128,7 @@ export function ChatView({
   const [selectedPeer, setSelectedPeer] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
+  const [lifetime, setLifetime] = useState('3600');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
@@ -266,12 +267,16 @@ export function ChatView({
     setError(null);
 
     try {
+      const lifetimeSecs = parseInt(lifetime, 10);
+      const validLifetime = !isNaN(lifetimeSecs) && lifetimeSecs > 0 ? lifetimeSecs : 3600;
+
       const res = await fetch('/api/v1/chat/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           peer: selectedPeer,
           content,
+          lifetime: validLifetime,
         }),
       });
 
@@ -585,6 +590,59 @@ export function ChatView({
                     <span class="hidden sm:inline">Send</span>
                   </button>
                 </form>
+
+                {/* Sub-bar: Message Lifetime configuration */}
+                <div class="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div class="flex items-center space-x-2">
+                    <label class="flex items-center space-x-1 font-medium text-slate-600 dark:text-slate-300">
+                      <span>⏱️</span>
+                      <span>Lifetime:</span>
+                    </label>
+                    <div class="flex items-center space-x-1.5">
+                      <input
+                        type="number"
+                        min="10"
+                        value={lifetime}
+                        onInput={(e) => setLifetime((e.target as HTMLInputElement).value)}
+                        placeholder="3600"
+                        class="w-20 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+                        title="Bundle lifetime in seconds"
+                      />
+                      <span class="text-[11px] font-mono text-slate-400">s</span>
+                    </div>
+
+                    {/* Quick duration presets */}
+                    <div class="flex items-center space-x-1 ml-1">
+                      {[
+                        { label: '15m', secs: 900 },
+                        { label: '30m', secs: 1800 },
+                        { label: '1h', secs: 3600 },
+                        { label: '6h', secs: 21600 },
+                        { label: '24h', secs: 86400 },
+                      ].map((p) => {
+                        const isActive = lifetime === p.secs.toString();
+                        return (
+                          <button
+                            key={p.secs}
+                            type="button"
+                            onClick={() => setLifetime(p.secs.toString())}
+                            class={`px-2 py-0.5 rounded text-[11px] font-mono transition ${
+                              isActive
+                                ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 font-semibold border border-emerald-300 dark:border-emerald-700'
+                                : 'bg-slate-100 dark:bg-slate-900 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700'
+                            }`}
+                          >
+                            {p.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <span class="text-[11px] text-slate-400 hidden sm:inline">
+                    Default 1h · Messages expire and auto-purge after this delay
+                  </span>
+                </div>
               </div>
             </>
           ) : (

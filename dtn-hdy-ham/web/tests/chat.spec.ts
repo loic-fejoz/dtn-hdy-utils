@@ -191,6 +191,19 @@ test.describe('Interactive Chat Service & Messenger', () => {
     await page.locator('nav button', { hasText: 'Chat' }).click();
     await page.locator('aside button', { hasText: 'dtn://f4jxq/chat' }).click();
 
+    // Verify lifetime input field defaults to 3600s (1h)
+    const lifetimeInput = page.locator('input[title="Bundle lifetime in seconds"]');
+    await expect(lifetimeInput).toBeVisible();
+    await expect(lifetimeInput).toHaveValue('3600');
+
+    // Test clicking preset '15m' updates value to 900
+    await page.locator('button', { hasText: '15m' }).click();
+    await expect(lifetimeInput).toHaveValue('900');
+
+    // Switch back to '1h' preset (3600s)
+    await page.locator('button', { hasText: '1h' }).click();
+    await expect(lifetimeInput).toHaveValue('3600');
+
     // Type message in textarea
     const input = page.locator('textarea[placeholder*="dtn://f4jxq/chat"]');
     await input.fill('Roger 59! Testing **markdown** and emojis 🚀');
@@ -202,6 +215,7 @@ test.describe('Interactive Chat Service & Messenger', () => {
     expect(dispatchedPayload).not.toBeNull();
     expect(dispatchedPayload.peer).toBe('dtn://f4jxq/chat');
     expect(dispatchedPayload.content).toBe('Roger 59! Testing **markdown** and emojis 🚀');
+    expect(dispatchedPayload.lifetime).toBe(3600);
 
     // Verify newly sent message bubble is rendered in thread with bold formatting
     await expect(page.locator('strong', { hasText: 'markdown' })).toBeVisible();
