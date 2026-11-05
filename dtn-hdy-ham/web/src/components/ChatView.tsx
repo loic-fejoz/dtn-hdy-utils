@@ -232,6 +232,25 @@ export function ChatView({
     }
   }, [lastReceivedChatMessage]);
 
+  // Periodic background sync for message expirations and active thread update
+  useEffect(() => {
+    const timer = setInterval(() => {
+      fetchConversations(selectedPeer || undefined);
+      if (selectedPeer) {
+        fetch(`/api/v1/chat/messages?peer=${encodeURIComponent(selectedPeer)}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data: ChatMessage[] | null) => {
+            if (data) {
+              setMessages(data);
+            }
+          })
+          .catch(() => {});
+      }
+    }, 4000);
+
+    return () => clearInterval(timer);
+  }, [selectedPeer]);
+
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

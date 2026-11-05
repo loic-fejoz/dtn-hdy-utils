@@ -326,6 +326,12 @@ async fn test_chat_service_full_workflow() {
             m.expiry_timestamp,
             m.timestamp
         );
+        // Both outbound and inbound messages must have 3600s (1h) lifetime
+        assert_eq!(
+            m.expiry_timestamp - m.timestamp,
+            3_600_000,
+            "Message lifetime must be 3600s (3600000 ms)"
+        );
     }
 
     let now_ms = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
@@ -340,4 +346,27 @@ async fn test_chat_service_full_workflow() {
         2,
         "Messages must persist across expiration checks"
     );
+
+    // 12. Advance time past 1 hour: both outbound and inbound messages must be expired and purged
+    let future_ms = now_ms + 3_601_000;
+    let purged = chat_manager.purge_expired(future_ms).unwrap();
+    assert_eq!(
+        purged, 2,
+        "Both outbound and inbound chat messages must be purged after 1 hour"
+    );
+
+    let msgs_expired = chat_manager
+        .get_conversation_messages("dtn://f4jxq/chat")
+        .unwrap();
+    assert_eq!(
+        msgs_expired.len(),
+        0,
+        "No messages should remain in conversation after expiration"
+    );
+
+    // Conversation thread must still be preserved in conversations list
+    let convs = chat_manager.list_conversations().unwrap();
+    let thread = convs.iter().find(|c| c.peer == "dtn://f4jxq/chat");
+    assert!(thread.is_some(), "Conversation thread should still persist");
+    assert_eq!(thread.unwrap().total_messages, 0);
 }

@@ -292,6 +292,11 @@ impl InternalStorage {
                 expiry_timestamp = expiry_timestamp + 946684800000
             WHERE timestamp > 0 AND timestamp < 1000000000000;
 
+            -- Migration: fix legacy outbound chat messages that had 24h (86400s) lifetime instead of 1h (3600s)
+            UPDATE chat_messages
+            SET expiry_timestamp = timestamp + 3600000
+            WHERE is_sticky = 0 AND (expiry_timestamp - timestamp) > 3600000;
+
             CREATE TABLE IF NOT EXISTS files_bundles (
                 id TEXT PRIMARY KEY,
                 source_eid TEXT NOT NULL,
@@ -1123,12 +1128,13 @@ mod tests {
         }
 
         // Check that timestamp & expiry_timestamp were migrated to Unix epoch (offset +946684800000)
+        // and that legacy 24h messages are aligned to 1h lifetime (3600000 ms)
         let msgs = storage
             .get_conversation_messages("dtn://f4jxq/chat")
             .unwrap();
         assert_eq!(msgs.len(), 1);
         let expected_unix_ts = dtn_ts + 946_684_800_000;
-        let expected_unix_expiry = dtn_expiry + 946_684_800_000;
+        let expected_unix_expiry = expected_unix_ts + 3_600_000;
         assert_eq!(msgs[0].timestamp, expected_unix_ts);
         assert_eq!(msgs[0].expiry_timestamp, expected_unix_expiry);
 
@@ -1151,5 +1157,76 @@ mod tests {
             .get_conversation_messages("dtn://f4jxq/chat")
             .unwrap();
         assert_eq!(msgs_expired.len(), 0);
+    }
+
+    #[test]
+    fn test_legacy_24h_outbound_chat_migration() {
+        let storage = InternalStorage::new_in_memory().unwrap();
+
+        let now_ms = 1_793_863_544_614_i64; // Unix epoch ms
+        let old_24h_expiry = now_ms + 86_400_000; // 24h
+
+        let outbound_msg = ChatMessage {
+            id: "outbound-legacy-24h".to_string(),
+            conversation_peer: "dtn://stata/chat".to_string(),
+            sender_eid: "dtn://station/chat".to_string(),
+            recipient_eid: "dtn://stata/chat".to_string(),
+            content: "Outbound message from yesterday".to_string(),
+            direction: "outbound".to_string(),
+            status: "sent".to_string(),
+            is_read: true,
+            is_sticky: false,
+            timestamp: now_ms,
+            expiry_timestamp: old_24h_expiry,
+            created_at: "2026-11-05T08:00:00Z".to_string(),
+        };
+
+        // Sticky message should NOT be modified even if > 3600s
+        let sticky_msg = ChatMessage {
+            id: "outbound-sticky".to_string(),
+            conversation_peer: "dtn://stata/chat".to_string(),
+            sender_eid: "dtn://station/chat".to_string(),
+            recipient_eid: "dtn://stata/chat".to_string(),
+            content: "Sticky message".to_string(),
+            direction: "outbound".to_string(),
+            status: "sent".to_string(),
+            is_read: true,
+            is_sticky: true,
+            timestamp: now_ms,
+            expiry_timestamp: old_24h_expiry,
+            created_at: "2026-11-05T08:00:00Z".to_string(),
+        };
+
+        storage.insert_chat_message(&outbound_msg).unwrap();
+        storage.insert_chat_message(&sticky_msg).unwrap();
+
+        // Run migration via init_tables
+        {
+            let conn = storage.conn.lock().unwrap();
+            InternalStorage::init_tables(&conn).unwrap();
+        }
+
+        let msgs = storage
+            .get_conversation_messages("dtn://stata/chat")
+            .unwrap();
+        let normal = msgs.iter().find(|m| m.id == "outbound-legacy-24h").unwrap();
+        let sticky = msgs.iter().find(|m| m.id == "outbound-sticky").unwrap();
+
+        // The non-sticky message should have been clamped to timestamp + 3600s (3600000ms)
+        assert_eq!(normal.expiry_timestamp, now_ms + 3_600_000);
+        // The sticky message should have kept its original expiry
+        assert_eq!(sticky.expiry_timestamp, old_24h_expiry);
+
+        // Advance time to 1 hour and 1 second after message creation:
+        // the normal message must be purged, while sticky remains!
+        let purge_time = now_ms + 3_601_000;
+        let purged = storage.purge_expired(purge_time).unwrap();
+        assert_eq!(purged, 1);
+
+        let remaining = storage
+            .get_conversation_messages("dtn://stata/chat")
+            .unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "outbound-sticky");
     }
 }

@@ -21,6 +21,7 @@ use crate::web::AppState;
 pub struct SendChatMessageRequest {
     pub peer: Option<String>,
     pub content: String,
+    pub lifetime: Option<u64>,
 }
 
 /// Request payload for creating a persistent conversation.
@@ -104,7 +105,12 @@ pub async fn get_conversation_messages_query(
 }
 
 /// Core dispatch logic for sending a chat message.
-async fn do_send_chat_message(state: AppState, peer: &str, content: &str) -> Response {
+async fn do_send_chat_message(
+    state: AppState,
+    peer: &str,
+    content: &str,
+    lifetime_override: Option<u64>,
+) -> Response {
     let content = content.trim();
     if content.is_empty() {
         return (
@@ -146,8 +152,9 @@ async fn do_send_chat_message(state: AppState, peer: &str, content: &str) -> Res
         }
     };
 
-    // Chat lifetime: 24 hours retention
-    let lifetime = std::time::Duration::from_secs(86400);
+    // Chat message lifetime: default to 3600 seconds (1 hour) matching standard bundle lifetime and peer chat messages
+    let lifetime_secs = lifetime_override.unwrap_or(3600);
+    let lifetime = std::time::Duration::from_secs(lifetime_secs);
 
     let (bundle, binbundle) = match Builder::new(sender_eid.clone(), recipient_eid.clone())
         .with_payload(content.as_bytes().into())
@@ -235,7 +242,7 @@ pub async fn send_chat_message(
     Path(peer): Path<String>,
     Json(payload): Json<SendChatMessageRequest>,
 ) -> impl IntoResponse {
-    do_send_chat_message(state, &peer, &payload.content).await
+    do_send_chat_message(state, &peer, &payload.content, payload.lifetime).await
 }
 
 /// POST /api/v1/chat/messages - Sends a new chat message using JSON body peer & content.
@@ -244,7 +251,7 @@ pub async fn send_chat_message_body(
     Json(payload): Json<SendChatMessageRequest>,
 ) -> impl IntoResponse {
     let peer = payload.peer.as_deref().unwrap_or("");
-    do_send_chat_message(state, peer, &payload.content).await
+    do_send_chat_message(state, peer, &payload.content, payload.lifetime).await
 }
 
 /// POST /api/v1/chat/conversations/{peer}/read - Marks inbound messages in a conversation as read.
