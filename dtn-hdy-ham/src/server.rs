@@ -178,36 +178,82 @@ impl HamServer {
                                         if let Some(ref sched) = cla_config.schedule {
                                             match sched {
                                                 ScheduleConfig::Recurring { cron, duration } => {
-                                                    if let Ok(cron_expr) =
-                                                        crate::coordinator::cron::CronExpr::parse(
-                                                            cron,
-                                                        )
-                                                    {
-                                                        let dur = *duration;
-                                                        let endpoint = Arc::new(
-                                                            crate::coordinator::endpoint::TcpclContactEndpoint::new(
-                                                                cla_manager.clone(),
-                                                                addr,
-                                                            ),
-                                                        );
-                                                        let target = ContactTarget {
-                                                            callsign: addr.to_string(),
-                                                            node_id: "dtn:none".parse().unwrap(),
-                                                            schedule: ContactSchedule::Recurring {
-                                                                cron: cron_expr,
-                                                                duration: dur,
-                                                            },
-                                                            grace_period:
-                                                                std::time::Duration::from_secs(30),
-                                                        };
-                                                        let coordinator = ContactCoordinator::new(
-                                                            endpoint,
-                                                            vec![target],
-                                                        );
-                                                        coordinators.push(coordinator);
+                                                    match crate::coordinator::cron::CronExpr::parse(
+                                                        cron,
+                                                    ) {
+                                                        Ok(cron_expr) => {
+                                                            let dur = *duration;
+                                                            let endpoint = Arc::new(
+                                                                crate::coordinator::endpoint::TcpclContactEndpoint::new(
+                                                                    cla_manager.clone(),
+                                                                    addr,
+                                                                ),
+                                                            );
+                                                            let target = ContactTarget {
+                                                                callsign: addr.to_string(),
+                                                                node_id: None,
+                                                                schedule:
+                                                                    ContactSchedule::Recurring {
+                                                                        cron: cron_expr,
+                                                                        duration: dur,
+                                                                    },
+                                                                grace_period:
+                                                                    std::time::Duration::from_secs(
+                                                                        30,
+                                                                    ),
+                                                            };
+                                                            let coordinator =
+                                                                ContactCoordinator::new(
+                                                                    endpoint,
+                                                                    vec![target],
+                                                                );
+                                                            coordinators.push(coordinator);
+                                                        }
+                                                        Err(e) => {
+                                                            warn!(
+                                                                "Failed to parse recurring contact cron expression '{}' for TCPCL peer {}: {}",
+                                                                cron, addr, e
+                                                            );
+                                                        }
                                                     }
                                                 }
-                                                _ => {}
+                                                ScheduleConfig::OneShot { start, end } => {
+                                                    let start_dt = start.as_ref().and_then(|s| {
+                                                        time::OffsetDateTime::parse(
+                                                            s,
+                                                            &time::format_description::well_known::Rfc3339,
+                                                        )
+                                                        .ok()
+                                                    });
+                                                    let end_dt = end.as_ref().and_then(|s| {
+                                                        time::OffsetDateTime::parse(
+                                                            s,
+                                                            &time::format_description::well_known::Rfc3339,
+                                                        )
+                                                        .ok()
+                                                    });
+                                                    let endpoint = Arc::new(
+                                                        crate::coordinator::endpoint::TcpclContactEndpoint::new(
+                                                            cla_manager.clone(),
+                                                            addr,
+                                                        ),
+                                                    );
+                                                    let target = ContactTarget {
+                                                        callsign: addr.to_string(),
+                                                        node_id: None,
+                                                        schedule: ContactSchedule::OneShot {
+                                                            start: start_dt,
+                                                            end: end_dt,
+                                                        },
+                                                        grace_period:
+                                                            std::time::Duration::from_secs(30),
+                                                    };
+                                                    let coordinator = ContactCoordinator::new(
+                                                        endpoint,
+                                                        vec![target],
+                                                    );
+                                                    coordinators.push(coordinator);
+                                                }
                                             }
                                         }
                                     }
@@ -269,9 +315,7 @@ impl HamServer {
                             .iter()
                             .map(|p| hardy_mercury_cla::PeerEntry {
                                 callsign: p.callsign.clone(),
-                                node_id: Some(
-                                    p.effective_node_id().parse().expect("valid peer node ID"),
-                                ),
+                                node_id: p.effective_node_id().parse().ok(),
                             })
                             .collect(),
                     };
@@ -317,9 +361,21 @@ impl HamServer {
                                     }
                                 }
                             };
+                            let peer_node = match p.effective_node_id().parse() {
+                                Ok(nid) => Some(nid),
+                                Err(e) => {
+                                    warn!(
+                                        "Invalid peer node ID '{}' for peer '{}': {}",
+                                        p.effective_node_id(),
+                                        p.callsign,
+                                        e
+                                    );
+                                    None
+                                }
+                            };
                             targets.push(ContactTarget {
                                 callsign: p.callsign.clone(),
-                                node_id: p.effective_node_id().parse().expect("valid peer node ID"),
+                                node_id: peer_node,
                                 schedule,
                                 grace_period: mercury_cfg
                                     .grace_period
@@ -539,9 +595,12 @@ impl HamServer {
         }
 
         if let Some(ref web_config) = self.config.web {
+            let injector = self.web_injector.clone().ok_or_else(|| {
+                anyhow::anyhow!("Web injector not initialized despite web config being enabled")
+            })?;
             let state = AppState {
                 config: Arc::new(self.config.clone()),
-                injector: self.web_injector.clone().expect("web_injector initialized"),
+                injector,
                 service_tracker: self.service_tracker.clone(),
                 cla_manager: self.cla_manager.clone(),
                 chat_manager: self.chat_manager.clone(),

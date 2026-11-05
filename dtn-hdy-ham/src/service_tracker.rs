@@ -56,7 +56,7 @@ struct InnerTracker {
 
 impl InnerTracker {
     fn list_services(&self) -> Vec<ServiceInfo> {
-        let map = self.services.read().unwrap();
+        let map = self.services.read().unwrap_or_else(|e| e.into_inner());
         map.values().cloned().collect()
     }
 
@@ -70,7 +70,7 @@ impl InnerTracker {
         };
 
         {
-            let mut map = self.services.write().unwrap();
+            let mut map = self.services.write().unwrap_or_else(|e| e.into_inner());
             map.insert(eid_str, info);
         }
 
@@ -81,7 +81,7 @@ impl InnerTracker {
         let eid_str = eid.to_string();
         info!("Unregistering active service: {}", eid_str);
         {
-            let mut map = self.services.write().unwrap();
+            let mut map = self.services.write().unwrap_or_else(|e| e.into_inner());
             map.remove(&eid_str);
         }
 
@@ -172,13 +172,21 @@ struct TrackedService {
 #[async_trait]
 impl Service for TrackedService {
     async fn on_register(&self, source: &Eid, sink: Box<dyn ServiceSink>) {
-        *self.registered_eid.lock().unwrap() = Some(source.clone());
+        *self
+            .registered_eid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(source.clone());
         self.tracker.record_service(source, &self.service_type);
         self.inner.on_register(source, sink).await;
     }
 
     async fn on_unregister(&self) {
-        if let Some(eid) = self.registered_eid.lock().unwrap().take() {
+        if let Some(eid) = self
+            .registered_eid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             self.tracker.remove_service(&eid);
         }
         self.inner.on_unregister().await;
@@ -221,13 +229,21 @@ struct TrackedApplication {
 #[async_trait]
 impl Application for TrackedApplication {
     async fn on_register(&self, source: &Eid, sink: Box<dyn ApplicationSink>) {
-        *self.registered_eid.lock().unwrap() = Some(source.clone());
+        *self
+            .registered_eid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(source.clone());
         self.tracker.record_service(source, &self.service_type);
         self.inner.on_register(source, sink).await;
     }
 
     async fn on_unregister(&self) {
-        if let Some(eid) = self.registered_eid.lock().unwrap().take() {
+        if let Some(eid) = self
+            .registered_eid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             self.tracker.remove_service(&eid);
         }
         self.inner.on_unregister().await;

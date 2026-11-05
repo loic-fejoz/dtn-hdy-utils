@@ -13,6 +13,10 @@ grpc:
 web:
   address: "127.0.0.1:8081"
 
+rfc9171-validity:
+  primary-block-integrity: false
+  bundle-age-required: false
+
 clas:
   - name: "tcpcl-f4jxq"
     type: "tcpclv4"
@@ -20,12 +24,15 @@ clas:
     require-tls: false
     peers:
       - "44.27.131.233:4556"
+    schedule:
+      type: "recurring"
+      cron: "*/43 * * * *"
+      duration: "300s"
 
 routes:
   - pattern: "dtn://f4jxq-9/*"
     cla: "tcpcl-f4jxq"
     next-hop: "dtn://f4jxq/"
-
-rfc9171-validity:
-  primary-block-integrity: false
-  bundle-age-required: false
+  - pattern: "dtn://**"
+    cla: "tcpcl-f4jxq"
+    next-hop: "dtn://f4jxq/"

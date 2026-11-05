@@ -95,11 +95,11 @@ pub fn serve_payload_with_range(
                     match range_opt {
                         Some((start, end)) => {
                             let range_len = end - start + 1;
-                            headers.insert(
-                                header::CONTENT_RANGE,
+                            if let Ok(hv) =
                                 HeaderValue::from_str(&format!("bytes {start}-{end}/{total_len}"))
-                                    .unwrap(),
-                            );
+                            {
+                                headers.insert(header::CONTENT_RANGE, hv);
+                            }
                             headers.insert(header::CONTENT_LENGTH, HeaderValue::from(range_len));
 
                             let sliced = bytes.slice(start..=end);
@@ -107,10 +107,9 @@ pub fn serve_payload_with_range(
                                 .into_response();
                         }
                         None => {
-                            headers.insert(
-                                header::CONTENT_RANGE,
-                                HeaderValue::from_str(&format!("bytes */{total_len}")).unwrap(),
-                            );
+                            if let Ok(hv) = HeaderValue::from_str(&format!("bytes */{total_len}")) {
+                                headers.insert(header::CONTENT_RANGE, hv);
+                            }
                             return (StatusCode::RANGE_NOT_SATISFIABLE, headers, Body::empty())
                                 .into_response();
                         }

@@ -32,7 +32,7 @@ pub enum ContactSchedule {
 #[derive(Debug, Clone)]
 pub struct ContactTarget {
     pub callsign: String,
-    pub node_id: NodeId,
+    pub node_id: Option<NodeId>,
     pub schedule: ContactSchedule,
     pub grace_period: Duration,
 }
@@ -112,7 +112,7 @@ impl ContactCoordinator {
                             "contact window opened for {}: initiating contact (duration={:?})",
                             target.callsign, duration
                         );
-                        if let Err(err) = self.endpoint.start_contact(&target.callsign, Some(&target.node_id)).await {
+                        if let Err(err) = self.endpoint.start_contact(&target.callsign, target.node_id.as_ref()).await {
                             error!("failed to start contact with {}: {err}", target.callsign);
                         } else {
                             // Wait for duration of contact
