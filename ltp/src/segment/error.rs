@@ -43,3 +43,13 @@ pub enum ParseError {
     #[error("reserved cancel reason code: 0x{0:02x}")]
     ReservedReason(u8),
 }
+
+/// Error returned when the MTU is strictly smaller than the minimum segment header and extensions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("MTU {mtu} is strictly smaller than required header length {header_len}")]
+pub struct MtuTooSmallError {
+    /// Configured MTU in octets.
+    pub mtu: usize,
+    /// Minimum required header and metadata length in octets.
+    pub header_len: usize,
+}

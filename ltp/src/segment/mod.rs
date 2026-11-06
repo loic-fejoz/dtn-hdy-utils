@@ -9,7 +9,7 @@ mod error;
 mod parse;
 mod write;
 
-pub use error::ParseError;
+pub use error::{MtuTooSmallError, ParseError};
 
 /// One header or trailer extension TLV (RFC 5326 §3.1.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,75 @@ pub struct DataSegment<'a> {
     pub kind: DataSegKind,
     /// Client service payload data.
     pub data: &'a [u8],
+}
+
+impl<'a> DataSegment<'a> {
+    /// Computes the fixed header overhead of a data segment in octets,
+    /// excluding the payload length SDNV and payload bytes.
+    #[must_use]
+    pub fn fixed_header_overhead(
+        session: SessionId,
+        client_service: u64,
+        offset: u64,
+        kind: DataSegKind,
+        header_ext: &[Extension<'_>],
+        trailer_ext: &[Extension<'_>],
+    ) -> usize {
+        let mut len = 1; // Control byte
+        len += crate::sdnv::encoded_len(session.originator.0);
+        len += crate::sdnv::encoded_len(session.number);
+        len += 1; // Extensions count byte
+
+        for e in header_ext.iter().chain(trailer_ext) {
+            len += 1 + crate::sdnv::encoded_len(e.value.len() as u64) + e.value.len();
+        }
+
+        len += crate::sdnv::encoded_len(client_service);
+        len += crate::sdnv::encoded_len(offset);
+        if let Some(cp) = kind.checkpoint() {
+            len += crate::sdnv::encoded_len(cp.serial.get())
+                + crate::sdnv::encoded_len(cp.report_serial);
+        }
+        len
+    }
+
+    /// Computes the maximum payload size in octets that can fit within the specified MTU.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(MtuTooSmallError)` if the MTU is strictly smaller than the minimum
+    /// required header length (which includes at least 1 octet for the payload length SDNV).
+    pub fn max_payload_for_mtu(
+        mtu: usize,
+        session: SessionId,
+        client_service: u64,
+        offset: u64,
+        kind: DataSegKind,
+        header_ext: &[Extension<'_>],
+        trailer_ext: &[Extension<'_>],
+    ) -> Result<usize, MtuTooSmallError> {
+        let fixed = Self::fixed_header_overhead(
+            session,
+            client_service,
+            offset,
+            kind,
+            header_ext,
+            trailer_ext,
+        );
+        let min_required = fixed + 1; // At least 1 octet for payload length SDNV (encoding 0)
+        if mtu < min_required {
+            return Err(MtuTooSmallError {
+                mtu,
+                header_len: min_required,
+            });
+        }
+        let available = mtu - fixed;
+        let mut p = available.saturating_sub(1);
+        while p + crate::sdnv::encoded_len(p as u64) > available {
+            p = available - crate::sdnv::encoded_len(p as u64);
+        }
+        Ok(p)
+    }
 }
 
 /// Classification of a data segment (RFC 5326 §3.1.2).

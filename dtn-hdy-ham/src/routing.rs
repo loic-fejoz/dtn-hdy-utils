@@ -174,19 +174,18 @@ impl RouteManager {
         if let Ok(content) = std::fs::read_to_string(&path)
             && let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Value>(&content)
             && let Ok(routes_val) = serde_yaml::to_value(&routes)
+            && let serde_yaml::Value::Mapping(ref mut map) = doc
         {
-            if let serde_yaml::Value::Mapping(ref mut map) = doc {
-                map.insert(serde_yaml::Value::String("routes".to_string()), routes_val);
-                if let Ok(new_yaml) = serde_yaml::to_string(&doc) {
-                    if let Err(e) = std::fs::write(&path, new_yaml) {
-                        warn!("Failed to persist routes to {}: {e}", path.display());
-                    } else {
-                        info!(
-                            "Persisted {} static route(s) to configuration {}",
-                            routes.len(),
-                            path.display()
-                        );
-                    }
+            map.insert(serde_yaml::Value::String("routes".to_string()), routes_val);
+            if let Ok(new_yaml) = serde_yaml::to_string(&doc) {
+                if let Err(e) = std::fs::write(&path, new_yaml) {
+                    warn!("Failed to persist routes to {}: {e}", path.display());
+                } else {
+                    info!(
+                        "Persisted {} static route(s) to configuration {}",
+                        routes.len(),
+                        path.display()
+                    );
                 }
             }
         }

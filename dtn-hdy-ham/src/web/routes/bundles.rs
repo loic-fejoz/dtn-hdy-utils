@@ -61,10 +61,11 @@ pub async fn maybe_remux_webm_to_ogg(payload: Vec<u8>) -> Vec<u8> {
                 });
             }
 
-            if let Ok(output) = child.wait_with_output() {
-                if output.status.success() && !output.stdout.is_empty() {
-                    return output.stdout;
-                }
+            if let Ok(output) = child.wait_with_output()
+                && output.status.success()
+                && !output.stdout.is_empty()
+            {
+                return output.stdout;
             }
             payload
         })

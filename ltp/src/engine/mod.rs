@@ -803,6 +803,33 @@ impl Engine {
         }
     }
 
+    fn initiate_cancel_sender(&mut self, session_id: SessionId, reason: CancelReason, now: u64) {
+        if let Some(session) = self.send_sessions.get_mut(&session_id) {
+            let peer = session.peer;
+            session.cancel_reason = Some(reason);
+            session.cancel_retries = 1;
+            self.record_cancelled(session_id);
+
+            let cs = Segment {
+                session: session_id,
+                header_ext: Vec::new(),
+                trailer_ext: Vec::new(),
+                body: SegmentBody::CancelSender { reason },
+            };
+            self.outbound.push_back((peer, cs.encode_to_vec()));
+
+            let deadline = peer_timeout_deadline_with(&self.peer_timings, &self.config, peer, now);
+            self.timer_table
+                .set(TimerKey::cancel(session_id, true), deadline);
+
+            self.notices
+                .push_back(Notice::TransmissionSessionCancelled {
+                    session: session_id,
+                    reason,
+                });
+        }
+    }
+
     fn handle_incoming_report(
         &mut self,
         from: EngineId,
@@ -881,6 +908,19 @@ impl Engine {
         } else {
             Vec::new()
         };
+
+        // RFC 5326 §6.22: Retransmission-Cycles Limit (mitigate infinite retransmission loops)
+        let needs_rxmt = !gaps.is_empty()
+            || (!session.claims_received.covers(&(0..session.red_len))
+                && session.checkpoints.is_empty());
+        if needs_rxmt {
+            session.rxmt_cycles = session.rxmt_cycles.saturating_add(1);
+            if session.rxmt_cycles > self.config.max_rxmt_cycles {
+                self.initiate_cancel_sender(session_id, CancelReason::RxmtCycExc, now);
+                return;
+            }
+        }
+
         let mtu = self.config.max_segment_payload_len.max(1);
 
         for (gap_idx, gap) in gaps.iter().enumerate() {
@@ -1268,29 +1308,7 @@ impl Engine {
                 .set(TimerKey::checkpoint(session_id, serial), deadline);
         } else {
             // Retransmission limit exceeded: initiate cancellation
-            let peer = session.peer;
-            session.cancel_reason = Some(CancelReason::Rlexc);
-            session.cancel_retries = 1;
-
-            let cs = Segment {
-                session: session_id,
-                header_ext: Vec::new(),
-                trailer_ext: Vec::new(),
-                body: SegmentBody::CancelSender {
-                    reason: CancelReason::Rlexc,
-                },
-            };
-            self.outbound.push_back((peer, cs.encode_to_vec()));
-
-            let deadline = peer_timeout_deadline_with(&self.peer_timings, &self.config, peer, now);
-            self.timer_table
-                .set(TimerKey::cancel(session_id, true), deadline);
-
-            self.notices
-                .push_back(Notice::TransmissionSessionCancelled {
-                    session: session_id,
-                    reason: CancelReason::Rlexc,
-                });
+            self.initiate_cancel_sender(session_id, CancelReason::Rlexc, now);
         }
     }
 

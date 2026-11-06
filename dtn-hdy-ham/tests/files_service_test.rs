@@ -389,8 +389,8 @@ async fn test_files_payload_range_requests_and_mime_detection() {
     ogg_opus_payload[26] = 1; // page_segments = 1
     ogg_opus_payload[28..36].copy_from_slice(b"OpusHead");
     // Write unique byte indices at the end so we can verify slice offsets
-    for i in 40..50 {
-        ogg_opus_payload[i] = i as u8;
+    for (idx, slot) in ogg_opus_payload[40..50].iter_mut().enumerate() {
+        *slot = (40 + idx) as u8;
     }
 
     let payload_path = storage_dir.join("test_audio.ogg");

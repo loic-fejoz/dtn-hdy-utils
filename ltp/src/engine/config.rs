@@ -33,6 +33,9 @@ pub struct EngineConfig {
     pub max_reports_per_session: usize,
     /// Maximum reception claims included in a single report segment (default 20, RFC 5326 / ION limit).
     pub max_claims_per_report: usize,
+    /// Maximum retransmission cycles allowed for a session before cancelling with `RXMTCYCEXC` (RFC 5326 §6.22).
+    /// Defaults to 10.
+    pub max_rxmt_cycles: u32,
     /// Allowed client service IDs (RFC 5326 §6.2).
     /// If `None`, any client service ID is accepted. If `Some(services)`, segments targeting
     /// an unregistered client service ID trigger session cancellation with `CR(UNREACH)`.
@@ -55,6 +58,7 @@ impl Default for EngineConfig {
             max_recv_sessions: 1024,
             max_reports_per_session: 64,
             max_claims_per_report: 20,
+            max_rxmt_cycles: 10,
             allowed_client_services: None,
         }
     }

@@ -60,6 +60,8 @@ pub struct SendSession {
     pub cancel_reason: Option<CancelReason>,
     /// Number of cancellation segments transmitted.
     pub cancel_retries: u32,
+    /// Number of retransmission cycles initiated upon receiving reports.
+    pub rxmt_cycles: u32,
 }
 
 impl SendSession {
@@ -88,6 +90,7 @@ impl SendSession {
             last_activity: now,
             cancel_reason: None,
             cancel_retries: 0,
+            rxmt_cycles: 0,
         }
     }
 

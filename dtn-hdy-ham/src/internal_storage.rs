@@ -106,8 +106,8 @@ pub fn normalize_peer_node(input: &str) -> String {
         return "dtn:none".to_string();
     }
 
-    if trimmed.starts_with("ipn:") {
-        let parts: Vec<&str> = trimmed[4..].split('.').collect();
+    if let Some(stripped) = trimmed.strip_prefix("ipn:") {
+        let parts: Vec<&str> = stripped.split('.').collect();
         if let Some(node) = parts.first() {
             return format!("ipn:{node}.0");
         }
@@ -772,13 +772,13 @@ impl InternalStorage {
 
         // Attempt payload deletion; ignore if already absent
         let path = Path::new(&rec.payload_path);
-        if path.exists() {
-            if let Err(e) = std::fs::remove_file(path) {
-                warn!(
-                    "Failed to remove payload file {} during deletion: {}",
-                    rec.payload_path, e
-                );
-            }
+        if path.exists()
+            && let Err(e) = std::fs::remove_file(path)
+        {
+            warn!(
+                "Failed to remove payload file {} during deletion: {}",
+                rec.payload_path, e
+            );
         }
 
         let conn = self
@@ -862,13 +862,13 @@ impl InternalStorage {
 
         for (id, path) in &expired_files {
             let p = Path::new(path);
-            if p.exists() {
-                if let Err(e) = std::fs::remove_file(p) {
-                    warn!(
-                        "Expiration: failed to delete payload file {} for bundle {}: {}",
-                        path, id, e
-                    );
-                }
+            if p.exists()
+                && let Err(e) = std::fs::remove_file(p)
+            {
+                warn!(
+                    "Expiration: failed to delete payload file {} for bundle {}: {}",
+                    path, id, e
+                );
             }
         }
 

@@ -89,66 +89,66 @@ pub fn serve_payload_with_range(
     );
 
     // Handle HTTP Range header (e.g., bytes=0-1023, bytes=1024-, bytes=-500)
-    if let Some(range_header) = req_headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
-        if let Some(range_spec) = range_header.strip_prefix("bytes=") {
-            let first_range = range_spec.split(',').next().unwrap_or("").trim();
-            if let Some((start_str, end_str)) = first_range.split_once('-') {
-                if total_len > 0 {
-                    let range_opt: Option<(usize, usize)> = if start_str.is_empty() {
-                        // Suffix range: -N (last N bytes)
-                        end_str.parse::<usize>().ok().and_then(|suffix_len| {
-                            if suffix_len == 0 {
-                                None
-                            } else {
-                                let start = total_len.saturating_sub(suffix_len);
-                                let end = total_len - 1;
-                                Some((start, end))
-                            }
-                        })
-                    } else if let Ok(start) = start_str.parse::<usize>() {
-                        if start < total_len {
-                            let end = if end_str.is_empty() {
-                                total_len - 1
-                            } else {
-                                end_str
-                                    .parse::<usize>()
-                                    .unwrap_or(total_len - 1)
-                                    .min(total_len - 1)
-                            };
-                            if start <= end {
-                                Some((start, end))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+    if let Some(range_header) = req_headers.get(header::RANGE).and_then(|v| v.to_str().ok())
+        && let Some(range_spec) = range_header.strip_prefix("bytes=")
+    {
+        let first_range = range_spec.split(',').next().unwrap_or("").trim();
+        if let Some((start_str, end_str)) = first_range.split_once('-')
+            && total_len > 0
+        {
+            let range_opt: Option<(usize, usize)> = if start_str.is_empty() {
+                // Suffix range: -N (last N bytes)
+                end_str.parse::<usize>().ok().and_then(|suffix_len| {
+                    if suffix_len == 0 {
+                        None
+                    } else {
+                        let start = total_len.saturating_sub(suffix_len);
+                        let end = total_len - 1;
+                        Some((start, end))
+                    }
+                })
+            } else if let Ok(start) = start_str.parse::<usize>() {
+                if start < total_len {
+                    let end = if end_str.is_empty() {
+                        total_len - 1
+                    } else {
+                        end_str
+                            .parse::<usize>()
+                            .unwrap_or(total_len - 1)
+                            .min(total_len - 1)
+                    };
+                    if start <= end {
+                        Some((start, end))
                     } else {
                         None
-                    };
-
-                    match range_opt {
-                        Some((start, end)) => {
-                            let range_len = end - start + 1;
-                            if let Ok(hv) =
-                                HeaderValue::from_str(&format!("bytes {start}-{end}/{total_len}"))
-                            {
-                                headers.insert(header::CONTENT_RANGE, hv);
-                            }
-                            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(range_len));
-
-                            let sliced = bytes.slice(start..=end);
-                            return (StatusCode::PARTIAL_CONTENT, headers, Body::from(sliced))
-                                .into_response();
-                        }
-                        None => {
-                            if let Ok(hv) = HeaderValue::from_str(&format!("bytes */{total_len}")) {
-                                headers.insert(header::CONTENT_RANGE, hv);
-                            }
-                            return (StatusCode::RANGE_NOT_SATISFIABLE, headers, Body::empty())
-                                .into_response();
-                        }
                     }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            match range_opt {
+                Some((start, end)) => {
+                    let range_len = end - start + 1;
+                    if let Ok(hv) =
+                        HeaderValue::from_str(&format!("bytes {start}-{end}/{total_len}"))
+                    {
+                        headers.insert(header::CONTENT_RANGE, hv);
+                    }
+                    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(range_len));
+
+                    let sliced = bytes.slice(start..=end);
+                    return (StatusCode::PARTIAL_CONTENT, headers, Body::from(sliced))
+                        .into_response();
+                }
+                None => {
+                    if let Ok(hv) = HeaderValue::from_str(&format!("bytes */{total_len}")) {
+                        headers.insert(header::CONTENT_RANGE, hv);
+                    }
+                    return (StatusCode::RANGE_NOT_SATISFIABLE, headers, Body::empty())
+                        .into_response();
                 }
             }
         }
