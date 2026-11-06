@@ -18,4 +18,5 @@ This directory contains records of the major architectural and design decisions 
 12. [ADR 12: Dedicated Interactive Chat Service for `dtn-hdy-ham`](0012-dedicated-interactive-chat-service.md)
 13. [ADR 13: Dedicated Internal Files Service, BUNDLE_LIST Viewer & Sticky Retention Policy](0013-internal-files-service-and-sticky-retention.md)
 14. [ADR 14: Dynamic Static Routing, Out-of-the-Box Gateway Peering & TCPCL Contact Coordinator](0014-dynamic-static-routing-and-tcpcl-peering-coordinator.md)
+15. [ADR 15: KISS Transport Leaky-Bucket Rate Limiter & Half-Duplex Checkpoint Pacing](0015-kiss-leaky-bucket-and-half-duplex-pacing.md)
 
