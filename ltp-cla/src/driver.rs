@@ -104,6 +104,141 @@ pub fn pad_segment_for_tnc(bytes: &[u8], min_frame_len: usize) -> std::borrow::C
     std::borrow::Cow::Borrowed(bytes)
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct KissPacingConfig {
+    pub min_frame_len: usize,
+    pub rate_limit_bytes_per_sec: Option<u64>,
+    pub burst_capacity_bytes: usize,
+    pub half_duplex: bool,
+    pub turnaround_mode: crate::config::TurnaroundMode,
+    pub turnaround_timeout: Duration,
+    pub dwell_time: Duration,
+}
+
+fn is_checkpoint_segment(bytes: &[u8]) -> bool {
+    if let Some(&first) = bytes.first() {
+        matches!(first & 0x0F, 1..=3)
+    } else {
+        false
+    }
+}
+
+fn is_report_segment(bytes: &[u8]) -> bool {
+    if let Some(&first) = bytes.first() {
+        (first & 0x0F) == 8
+    } else {
+        false
+    }
+}
+
+struct LeakyBucket {
+    rate_bytes_per_sec: u64,
+    burst_capacity: f64,
+    tokens: f64,
+    last_update: tokio::time::Instant,
+}
+
+impl LeakyBucket {
+    fn new(rate_bytes_per_sec: u64, burst_capacity: usize) -> Self {
+        Self {
+            rate_bytes_per_sec,
+            burst_capacity: burst_capacity as f64,
+            tokens: burst_capacity as f64,
+            last_update: tokio::time::Instant::now(),
+        }
+    }
+
+    async fn acquire(&mut self, bytes_len: usize) {
+        if self.rate_bytes_per_sec == 0 {
+            return;
+        }
+        let now = tokio::time::Instant::now();
+        let elapsed = now.duration_since(self.last_update).as_secs_f64();
+        self.tokens =
+            (self.tokens + elapsed * (self.rate_bytes_per_sec as f64)).min(self.burst_capacity);
+        self.last_update = now;
+
+        let cost = bytes_len as f64;
+        if self.tokens < cost {
+            let deficit = cost - self.tokens;
+            let wait_secs = deficit / (self.rate_bytes_per_sec as f64);
+            tokio::time::sleep(Duration::from_secs_f64(wait_secs)).await;
+            self.tokens = 0.0;
+            self.last_update = tokio::time::Instant::now();
+        } else {
+            self.tokens -= cost;
+        }
+    }
+}
+
+struct HalfDuplexPacer {
+    enabled: bool,
+    mode: crate::config::TurnaroundMode,
+    turnaround_timeout: Duration,
+    dwell_time: Duration,
+    pause_deadline: Option<tokio::time::Instant>,
+}
+
+impl HalfDuplexPacer {
+    fn new(config: &KissPacingConfig) -> Self {
+        Self {
+            enabled: config.half_duplex,
+            mode: config.turnaround_mode,
+            turnaround_timeout: config.turnaround_timeout,
+            dwell_time: config.dwell_time,
+            pause_deadline: None,
+        }
+    }
+
+    fn is_paused(&self, now: tokio::time::Instant) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if let Some(dl) = self.pause_deadline {
+            now < dl
+        } else {
+            false
+        }
+    }
+
+    fn on_checkpoint_sent(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        let duration = match self.mode {
+            crate::config::TurnaroundMode::WaitForReport => self.turnaround_timeout,
+            crate::config::TurnaroundMode::FixedDwell => self.dwell_time,
+        };
+        self.pause_deadline = Some(tokio::time::Instant::now() + duration);
+        debug!(
+            "Half-duplex: Checkpoint emitted, pausing transmission queue for {:?}",
+            duration
+        );
+    }
+
+    fn on_report_received(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        if self.mode == crate::config::TurnaroundMode::WaitForReport
+            && self.pause_deadline.is_some()
+        {
+            debug!(
+                "Half-duplex: Report Segment received, unpausing transmission queue immediately"
+            );
+            self.pause_deadline = None;
+        }
+    }
+
+    fn next_deadline(&self) -> Option<tokio::time::Instant> {
+        if !self.enabled {
+            None
+        } else {
+            self.pause_deadline
+        }
+    }
+}
+
 impl Driver {
     /// Spawns the driver task based on configuration.
     pub fn spawn(
@@ -177,14 +312,29 @@ impl Driver {
                 reconnect_initial_delay,
                 reconnect_max_delay,
                 min_frame_len,
+                rate_limit_bytes_per_sec,
+                burst_capacity_bytes,
+                half_duplex,
+                turnaround_mode,
+                turnaround_timeout,
+                dwell_time,
             } => {
+                let pacing = KissPacingConfig {
+                    min_frame_len,
+                    rate_limit_bytes_per_sec,
+                    burst_capacity_bytes,
+                    half_duplex,
+                    turnaround_mode,
+                    turnaround_timeout,
+                    dwell_time,
+                };
                 self.run_kiss_tcp(
                     server_addr,
                     bind_addr,
                     port,
                     reconnect_initial_delay,
                     reconnect_max_delay,
-                    min_frame_len,
+                    pacing,
                     addr_tx,
                 )
                 .await
@@ -336,7 +486,7 @@ impl Driver {
         port: u8,
         reconnect_initial_delay: Duration,
         reconnect_max_delay: Duration,
-        min_frame_len: usize,
+        pacing: KissPacingConfig,
         addr_tx: oneshot::Sender<std::io::Result<SocketAddr>>,
     ) -> Result<()> {
         // Signal server address immediately so on_register does not block
@@ -378,22 +528,39 @@ impl Driver {
                     let mut raw_rx_buf = vec![0u8; 4096];
                     let mut kiss_accumulator = Vec::with_capacity(8192);
 
-                    // Drain any output segments queued while disconnected in a single batched buffer
-                    let mut frame_buf = Vec::new();
-                    while let Some((_peer, bytes)) = self.engine.poll_output() {
-                        let payload = pad_segment_for_tnc(&bytes, min_frame_len);
-                        encode_frame(port, Command::Data, &payload, &mut frame_buf);
-                    }
+                    let mut leaky_bucket = pacing
+                        .rate_limit_bytes_per_sec
+                        .map(|rate| LeakyBucket::new(rate, pacing.burst_capacity_bytes));
+                    let mut pacer = HalfDuplexPacer::new(&pacing);
+
+                    // Drain any output segments queued while disconnected obeying pacing and shaper
                     let mut write_err = false;
-                    if !frame_buf.is_empty()
-                        && let Err(e) = writer.write_all(&frame_buf).await
-                    {
-                        warn!("KISS TCP initial write error to {server_addr}: {e}");
-                        write_err = true;
+                    if !pacer.is_paused(tokio::time::Instant::now()) {
+                        while let Some((_peer, bytes)) = self.engine.poll_output() {
+                            let is_cp = is_checkpoint_segment(&bytes);
+                            let payload = pad_segment_for_tnc(&bytes, pacing.min_frame_len);
+                            let mut frame = Vec::new();
+                            encode_frame(port, Command::Data, &payload, &mut frame);
+
+                            if let Some(ref mut shaper) = leaky_bucket {
+                                shaper.acquire(frame.len()).await;
+                            }
+
+                            if let Err(e) = writer.write_all(&frame).await {
+                                warn!("KISS TCP initial write error to {server_addr}: {e}");
+                                write_err = true;
+                                break;
+                            }
+
+                            if is_cp {
+                                pacer.on_checkpoint_sent();
+                                break;
+                            }
+                        }
                     }
 
                     if !write_err {
-                        let disconnect_reason = loop {
+                        let disconnect_reason = 'connected_loop: loop {
                             let now = self.now_micros();
                             let next_timer = self.engine.next_timer_deadline();
 
@@ -410,10 +577,22 @@ impl Driver {
                                 }
                             };
 
+                            let pacer_deadline = pacer.next_deadline();
+                            let pacer_future = async {
+                                match pacer_deadline {
+                                    Some(dl) => tokio::time::sleep_until(dl).await,
+                                    None => std::future::pending::<()>().await,
+                                }
+                            };
+
                             tokio::select! {
                                 _ = cancel.cancelled() => {
                                     debug!("LTP KISS TCP connected loop cancelled");
                                     break "driver cancelled";
+                                }
+                                _ = pacer_future => {
+                                    debug!("Half-duplex: pacer turnaround deadline elapsed, unpausing");
+                                    pacer.pause_deadline = None;
                                 }
                                 read_res = reader.read(&mut raw_rx_buf) => {
                                     match read_res {
@@ -435,6 +614,9 @@ impl Driver {
                                             while let Ok(Some((frame, consumed))) = decode_frame(&kiss_accumulator[offset..]) {
                                                 offset += consumed;
                                                 if frame.command == Command::Data {
+                                                    if is_report_segment(&frame.payload) {
+                                                        pacer.on_report_received();
+                                                    }
                                                     let now = self.now_micros();
                                                     // Dynamic peer identification on KISS frames (supports shared TNC / multi-station)
                                                     let peer_engine = if let Ok(session) = Segment::peek_session(&frame.payload) {
@@ -477,17 +659,28 @@ impl Driver {
                                 }
                             }
 
-                            // Drain outputs over KISS in batches with a single write_all
-                            let mut frame_buf = Vec::new();
-                            while let Some((_peer, bytes)) = self.engine.poll_output() {
-                                let payload = pad_segment_for_tnc(&bytes, min_frame_len);
-                                encode_frame(port, Command::Data, &payload, &mut frame_buf);
-                            }
-                            if !frame_buf.is_empty()
-                                && let Err(e) = writer.write_all(&frame_buf).await
-                            {
-                                warn!("KISS TCP write error to {server_addr}: {e}");
-                                break "write error";
+                            // Drain outputs over KISS obeying half-duplex pacing and leaky-bucket rate limiting
+                            if !pacer.is_paused(tokio::time::Instant::now()) {
+                                while let Some((_peer, bytes)) = self.engine.poll_output() {
+                                    let is_cp = is_checkpoint_segment(&bytes);
+                                    let payload = pad_segment_for_tnc(&bytes, pacing.min_frame_len);
+                                    let mut frame = Vec::new();
+                                    encode_frame(port, Command::Data, &payload, &mut frame);
+
+                                    if let Some(ref mut shaper) = leaky_bucket {
+                                        shaper.acquire(frame.len()).await;
+                                    }
+
+                                    if let Err(e) = writer.write_all(&frame).await {
+                                        warn!("KISS TCP write error to {server_addr}: {e}");
+                                        break 'connected_loop "write error";
+                                    }
+
+                                    if is_cp {
+                                        pacer.on_checkpoint_sent();
+                                        break;
+                                    }
+                                }
                             }
 
                             self.drain_notices().await?;
@@ -834,5 +1027,129 @@ impl Driver {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::TurnaroundMode;
+
+    #[test]
+    fn test_is_checkpoint_and_report_segment() {
+        // Red Data non-CP (0)
+        assert!(!is_checkpoint_segment(&[0x00, 0x11, 0x22]));
+        // Red Data Checkpoints (1, 2, 3)
+        assert!(is_checkpoint_segment(&[0x01, 0x11, 0x22]));
+        assert!(is_checkpoint_segment(&[0x02, 0x11, 0x22]));
+        assert!(is_checkpoint_segment(&[0x03, 0x11, 0x22]));
+        // Red Data EORP non-CP (4)
+        assert!(!is_checkpoint_segment(&[0x04, 0x11, 0x22]));
+        // Report Segment (8)
+        assert!(is_report_segment(&[0x08, 0x11, 0x22]));
+        // Report Ack (9)
+        assert!(!is_report_segment(&[0x09, 0x11, 0x22]));
+        // Empty buffer
+        assert!(!is_checkpoint_segment(&[]));
+        assert!(!is_report_segment(&[]));
+    }
+
+    #[tokio::test]
+    async fn test_leaky_bucket_pacing() {
+        let mut bucket = LeakyBucket::new(10_000, 500); // 10,000 B/s, max burst 500 B
+        let start = tokio::time::Instant::now();
+
+        // Immediate consumption of initial burst
+        bucket.acquire(500).await;
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "Burst acquisition should be near instantaneous"
+        );
+
+        // Consuming 1000 more bytes at 10,000 B/s requires ~100ms
+        bucket.acquire(1000).await;
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(80),
+            "Paced acquisition should sleep for token replenishment"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_half_duplex_pacer_wait_for_report() {
+        let cfg = KissPacingConfig {
+            min_frame_len: 0,
+            rate_limit_bytes_per_sec: None,
+            burst_capacity_bytes: 512,
+            half_duplex: true,
+            turnaround_mode: TurnaroundMode::WaitForReport,
+            turnaround_timeout: Duration::from_millis(300),
+            dwell_time: Duration::from_millis(100),
+        };
+        let mut pacer = HalfDuplexPacer::new(&cfg);
+
+        let now = tokio::time::Instant::now();
+        assert!(!pacer.is_paused(now));
+
+        // Checkpoint emitted -> paused
+        pacer.on_checkpoint_sent();
+        assert!(pacer.is_paused(tokio::time::Instant::now()));
+
+        // Report Segment received -> unpaused immediately
+        pacer.on_report_received();
+        assert!(!pacer.is_paused(tokio::time::Instant::now()));
+    }
+
+    #[tokio::test]
+    async fn test_half_duplex_pacer_turnaround_timeout() {
+        let cfg = KissPacingConfig {
+            min_frame_len: 0,
+            rate_limit_bytes_per_sec: None,
+            burst_capacity_bytes: 512,
+            half_duplex: true,
+            turnaround_mode: TurnaroundMode::WaitForReport,
+            turnaround_timeout: Duration::from_millis(50),
+            dwell_time: Duration::from_millis(100),
+        };
+        let mut pacer = HalfDuplexPacer::new(&cfg);
+
+        pacer.on_checkpoint_sent();
+        assert!(pacer.is_paused(tokio::time::Instant::now()));
+
+        // Wait past turnaround timeout
+        tokio::time::sleep(Duration::from_millis(70)).await;
+        assert!(
+            !pacer.is_paused(tokio::time::Instant::now()),
+            "Pacer should unpause when turnaround timeout expires"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_half_duplex_pacer_fixed_dwell() {
+        let cfg = KissPacingConfig {
+            min_frame_len: 0,
+            rate_limit_bytes_per_sec: None,
+            burst_capacity_bytes: 512,
+            half_duplex: true,
+            turnaround_mode: TurnaroundMode::FixedDwell,
+            turnaround_timeout: Duration::from_millis(300),
+            dwell_time: Duration::from_millis(60),
+        };
+        let mut pacer = HalfDuplexPacer::new(&cfg);
+
+        pacer.on_checkpoint_sent();
+        assert!(pacer.is_paused(tokio::time::Instant::now()));
+
+        // In FixedDwell mode, receiving an RS does NOT cancel the dwell pause
+        pacer.on_report_received();
+        assert!(pacer.is_paused(tokio::time::Instant::now()));
+
+        // Once dwell_time expires, pacer unpauses
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(
+            !pacer.is_paused(tokio::time::Instant::now()),
+            "Pacer should unpause after dwell time"
+        );
     }
 }

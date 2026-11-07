@@ -23,6 +23,11 @@ clas:
       server-addr: "127.0.0.1:8101"
       port: 0
       min-frame-len: 15
+      half-duplex: true
+      turnaround-mode: "wait-for-report"
+      turnaround-timeout: "3s"
+      rate-limit-bytes-per-sec: 1200
+      burst-capacity-bytes: 1024
     peers:
       - engine-id: 1
         node-id: "dtn://stata.ampr.org/"

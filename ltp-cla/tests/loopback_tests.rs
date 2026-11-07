@@ -27,7 +27,7 @@ use hardy_ltp::segment::{
 };
 use hardy_ltp::types::{CancelReason, SessionId};
 use hardy_ltp_cla::{
-    Config, EngineId, LtpCla, PeerEntry, TransportMode, cla_address_to_engine_id,
+    Config, EngineId, LtpCla, PeerEntry, TransportMode, TurnaroundMode, cla_address_to_engine_id,
     engine_id_to_cla_address,
 };
 
@@ -383,14 +383,12 @@ async fn test_kiss_tcp_reconnection_and_backoff() {
 
     let cfg = Config {
         engine_id: EngineId(1),
-        transport: TransportMode::KissTcp {
+        transport: TransportMode::kiss_tcp_with_reconnect(
             server_addr,
-            bind_addr: None,
-            port: 0,
-            reconnect_initial_delay: Duration::from_millis(50),
-            reconnect_max_delay: Duration::from_millis(200),
-            min_frame_len: 0,
-        },
+            0,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        ),
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
         ack_margin: Duration::from_millis(25),
@@ -474,14 +472,12 @@ async fn test_s17_multi_station_kiss_tcp_peer_resolution() {
 
     let cfg = Config {
         engine_id: EngineId(1),
-        transport: TransportMode::KissTcp {
+        transport: TransportMode::kiss_tcp_with_reconnect(
             server_addr,
-            bind_addr: None,
-            port: 0,
-            reconnect_initial_delay: Duration::from_millis(50),
-            reconnect_max_delay: Duration::from_millis(200),
-            min_frame_len: 0,
-        },
+            0,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        ),
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(100),
         ack_margin: Duration::from_millis(50),
@@ -574,14 +570,12 @@ async fn test_s18_driver_shutdown_notifies_pending_transfers() {
 
     let cfg = Config {
         engine_id: EngineId(1),
-        transport: TransportMode::KissTcp {
+        transport: TransportMode::kiss_tcp_with_reconnect(
             server_addr,
-            bind_addr: None,
-            port: 0,
-            reconnect_initial_delay: Duration::from_millis(50),
-            reconnect_max_delay: Duration::from_millis(200),
-            min_frame_len: 0,
-        },
+            0,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        ),
         max_segment_payload_len: 1024,
         rtt: Duration::from_secs(10), // Long RTT so it doesn't expire during test
         ack_margin: Duration::from_secs(5),
@@ -980,14 +974,12 @@ async fn test_s41_kiss_tcp_extreme_stream_fragmentation() {
 
     let cfg = Config {
         engine_id: EngineId(1),
-        transport: TransportMode::KissTcp {
+        transport: TransportMode::kiss_tcp_with_reconnect(
             server_addr,
-            bind_addr: None,
-            port: 0,
-            reconnect_initial_delay: Duration::from_millis(50),
-            reconnect_max_delay: Duration::from_millis(200),
-            min_frame_len: 0,
-        },
+            0,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        ),
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
         ack_margin: Duration::from_millis(25),
@@ -1103,14 +1095,12 @@ async fn test_s42_kiss_tcp_accumulator_overflow_and_recovery() {
 
     let cfg = Config {
         engine_id: EngineId(1),
-        transport: TransportMode::KissTcp {
+        transport: TransportMode::kiss_tcp_with_reconnect(
             server_addr,
-            bind_addr: None,
-            port: 0,
-            reconnect_initial_delay: Duration::from_millis(50),
-            reconnect_max_delay: Duration::from_millis(200),
-            min_frame_len: 0,
-        },
+            0,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        ),
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
         ack_margin: Duration::from_millis(25),
@@ -1222,14 +1212,12 @@ async fn test_s43_kiss_tcp_non_data_commands_ignored() {
 
     let cfg = Config {
         engine_id: EngineId(1),
-        transport: TransportMode::KissTcp {
+        transport: TransportMode::kiss_tcp_with_reconnect(
             server_addr,
-            bind_addr: None,
-            port: 0,
-            reconnect_initial_delay: Duration::from_millis(50),
-            reconnect_max_delay: Duration::from_millis(200),
-            min_frame_len: 0,
-        },
+            0,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        ),
         max_segment_payload_len: 1024,
         rtt: Duration::from_millis(50),
         ack_margin: Duration::from_millis(25),
@@ -2292,4 +2280,413 @@ fn test_pad_segment_for_tnc_minimum_size() {
     let large = vec![0x42u8; 50];
     let padded_large = hardy_ltp_cla::pad_segment_for_tnc(&large, 15);
     assert_eq!(padded_large.len(), 50);
+}
+
+#[tokio::test]
+async fn test_kiss_tcp_leaky_bucket_transfer() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (mut sa, _) = listener.accept().await.unwrap();
+        let (mut sb, _) = listener.accept().await.unwrap();
+        let (mut ra, mut wa) = sa.split();
+        let (mut rb, mut wb) = sb.split();
+
+        let a_to_b = async {
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = ra.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                wb.write_all(&buf[..n]).await.unwrap();
+            }
+        };
+
+        let b_to_a = async {
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = rb.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                wa.write_all(&buf[..n]).await.unwrap();
+            }
+        };
+
+        tokio::select! {
+            _ = a_to_b => {}
+            _ = b_to_a => {}
+        }
+    });
+
+    let (disp_tx_1, _disp_rx_1) = mpsc::channel(16);
+    let (outc_tx_1, mut outc_rx_1) = mpsc::channel(16);
+    let sink_1 = Box::new(MockSink {
+        dispatches: disp_tx_1,
+        outcomes: outc_tx_1,
+    });
+
+    let (disp_tx_2, mut disp_rx_2) = mpsc::channel(16);
+    let (outc_tx_2, _outc_rx_2) = mpsc::channel(16);
+    let sink_2 = Box::new(MockSink {
+        dispatches: disp_tx_2,
+        outcomes: outc_tx_2,
+    });
+
+    let node_id_1: NodeId = "dtn://node-1/".parse().unwrap();
+    let node_id_2: NodeId = "dtn://node-2/".parse().unwrap();
+
+    // Node 1: Engine 1 with Leaky-Bucket enabled (50,000 B/s, 2048 B burst)
+    let cfg_1 = Config {
+        engine_id: EngineId(1),
+        transport: TransportMode::kiss_tcp(server_addr, 0).with_rate_limit(50_000, 2048),
+        max_segment_payload_len: 1024,
+        rtt: Duration::from_millis(50),
+        ack_margin: Duration::from_millis(25),
+        checkpoint_rtx_limit: 5,
+        report_rtx_limit: 5,
+        peers: vec![PeerEntry {
+            engine_id: EngineId(2),
+            address: Some(server_addr),
+            node_id: Some(node_id_2.clone()),
+            ..Default::default()
+        }],
+    };
+    let cla_1 = LtpCla::new(cfg_1);
+    cla_1.on_register(sink_1, &[], None).await;
+
+    // Node 2: Engine 2 with Leaky-Bucket enabled
+    let cfg_2 = Config {
+        engine_id: EngineId(2),
+        transport: TransportMode::kiss_tcp(server_addr, 0).with_rate_limit(50_000, 2048),
+        max_segment_payload_len: 1024,
+        rtt: Duration::from_millis(50),
+        ack_margin: Duration::from_millis(25),
+        checkpoint_rtx_limit: 5,
+        report_rtx_limit: 5,
+        peers: vec![PeerEntry {
+            engine_id: EngineId(1),
+            address: Some(server_addr),
+            node_id: Some(node_id_1.clone()),
+            ..Default::default()
+        }],
+    };
+    let cla_2 = LtpCla::new(cfg_2);
+    cla_2.on_register(sink_2, &[], None).await;
+
+    let mut payload = vec![0u8; 8192];
+    for (i, b) in payload.iter_mut().enumerate() {
+        *b = ((i * 17) ^ 0xAA) as u8;
+    }
+    let expected_hash = Sha256::digest(&payload);
+    let bundle_id = create_test_bundle_id("node-1");
+    let mut stream = Bytes::copy_from_slice(&payload);
+
+    let forward_res = cla_1
+        .forward(
+            None,
+            &ClaAddress::Tcp(server_addr),
+            &bundle_id,
+            payload.len() as u64,
+            &mut stream,
+        )
+        .await
+        .expect("KISS rate limited forward succeeds");
+
+    assert!(matches!(forward_res, ForwardBundleResult::Accepted));
+
+    let (_, _, received_bytes) = tokio::time::timeout(Duration::from_secs(5), disp_rx_2.recv())
+        .await
+        .expect("dispatched bundle received")
+        .expect("stream ok");
+
+    assert_eq!(Sha256::digest(&received_bytes), expected_hash);
+
+    let (outcome_bundle_id, outcome) =
+        tokio::time::timeout(Duration::from_secs(5), outc_rx_1.recv())
+            .await
+            .expect("transfer outcome received")
+            .expect("stream ok");
+
+    assert_eq!(outcome_bundle_id, bundle_id);
+    assert_eq!(outcome, TransferOutcome::Completed);
+
+    cla_1.unregister().await;
+    cla_2.unregister().await;
+}
+
+#[tokio::test]
+async fn test_kiss_tcp_half_duplex_wait_for_report() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (mut sa, _) = listener.accept().await.unwrap();
+        let (mut sb, _) = listener.accept().await.unwrap();
+        let (mut ra, mut wa) = sa.split();
+        let (mut rb, mut wb) = sb.split();
+
+        let a_to_b = async {
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = ra.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                wb.write_all(&buf[..n]).await.unwrap();
+            }
+        };
+
+        let b_to_a = async {
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = rb.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                wa.write_all(&buf[..n]).await.unwrap();
+            }
+        };
+
+        tokio::select! {
+            _ = a_to_b => {}
+            _ = b_to_a => {}
+        }
+    });
+
+    let (disp_tx_1, _disp_rx_1) = mpsc::channel(16);
+    let (outc_tx_1, mut outc_rx_1) = mpsc::channel(16);
+    let sink_1 = Box::new(MockSink {
+        dispatches: disp_tx_1,
+        outcomes: outc_tx_1,
+    });
+
+    let (disp_tx_2, mut disp_rx_2) = mpsc::channel(16);
+    let (outc_tx_2, _outc_rx_2) = mpsc::channel(16);
+    let sink_2 = Box::new(MockSink {
+        dispatches: disp_tx_2,
+        outcomes: outc_tx_2,
+    });
+
+    let node_id_1: NodeId = "dtn://node-1/".parse().unwrap();
+    let node_id_2: NodeId = "dtn://node-2/".parse().unwrap();
+
+    // Node 1: Engine 1 with Half-Duplex WaitForReport mode
+    let cfg_1 = Config {
+        engine_id: EngineId(1),
+        transport: TransportMode::kiss_tcp(server_addr, 0)
+            .with_half_duplex(TurnaroundMode::WaitForReport, Duration::from_millis(500)),
+        max_segment_payload_len: 1024,
+        rtt: Duration::from_millis(50),
+        ack_margin: Duration::from_millis(25),
+        checkpoint_rtx_limit: 5,
+        report_rtx_limit: 5,
+        peers: vec![PeerEntry {
+            engine_id: EngineId(2),
+            address: Some(server_addr),
+            node_id: Some(node_id_2.clone()),
+            ..Default::default()
+        }],
+    };
+    let cla_1 = LtpCla::new(cfg_1);
+    cla_1.on_register(sink_1, &[], None).await;
+
+    // Node 2: Engine 2 with Half-Duplex WaitForReport mode
+    let cfg_2 = Config {
+        engine_id: EngineId(2),
+        transport: TransportMode::kiss_tcp(server_addr, 0)
+            .with_half_duplex(TurnaroundMode::WaitForReport, Duration::from_millis(500)),
+        max_segment_payload_len: 1024,
+        rtt: Duration::from_millis(50),
+        ack_margin: Duration::from_millis(25),
+        checkpoint_rtx_limit: 5,
+        report_rtx_limit: 5,
+        peers: vec![PeerEntry {
+            engine_id: EngineId(1),
+            address: Some(server_addr),
+            node_id: Some(node_id_1.clone()),
+            ..Default::default()
+        }],
+    };
+    let cla_2 = LtpCla::new(cfg_2);
+    cla_2.on_register(sink_2, &[], None).await;
+
+    let mut payload = vec![0u8; 8192];
+    for (i, b) in payload.iter_mut().enumerate() {
+        *b = ((i * 23) ^ 0x55) as u8;
+    }
+    let expected_hash = Sha256::digest(&payload);
+    let bundle_id = create_test_bundle_id("node-1");
+    let mut stream = Bytes::copy_from_slice(&payload);
+
+    let forward_res = cla_1
+        .forward(
+            None,
+            &ClaAddress::Tcp(server_addr),
+            &bundle_id,
+            payload.len() as u64,
+            &mut stream,
+        )
+        .await
+        .expect("KISS half-duplex forward succeeds");
+
+    assert!(matches!(forward_res, ForwardBundleResult::Accepted));
+
+    let (_, _, received_bytes) = tokio::time::timeout(Duration::from_secs(5), disp_rx_2.recv())
+        .await
+        .expect("dispatched bundle received")
+        .expect("stream ok");
+
+    assert_eq!(Sha256::digest(&received_bytes), expected_hash);
+
+    let (outcome_bundle_id, outcome) =
+        tokio::time::timeout(Duration::from_secs(5), outc_rx_1.recv())
+            .await
+            .expect("transfer outcome received")
+            .expect("stream ok");
+
+    assert_eq!(outcome_bundle_id, bundle_id);
+    assert_eq!(outcome, TransferOutcome::Completed);
+
+    cla_1.unregister().await;
+    cla_2.unregister().await;
+}
+
+#[tokio::test]
+async fn test_kiss_tcp_half_duplex_fixed_dwell() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (mut sa, _) = listener.accept().await.unwrap();
+        let (mut sb, _) = listener.accept().await.unwrap();
+        let (mut ra, mut wa) = sa.split();
+        let (mut rb, mut wb) = sb.split();
+
+        let a_to_b = async {
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = ra.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                wb.write_all(&buf[..n]).await.unwrap();
+            }
+        };
+
+        let b_to_a = async {
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = rb.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                wa.write_all(&buf[..n]).await.unwrap();
+            }
+        };
+
+        tokio::select! {
+            _ = a_to_b => {}
+            _ = b_to_a => {}
+        }
+    });
+
+    let (disp_tx_1, _disp_rx_1) = mpsc::channel(16);
+    let (outc_tx_1, mut outc_rx_1) = mpsc::channel(16);
+    let sink_1 = Box::new(MockSink {
+        dispatches: disp_tx_1,
+        outcomes: outc_tx_1,
+    });
+
+    let (disp_tx_2, mut disp_rx_2) = mpsc::channel(16);
+    let (outc_tx_2, _outc_rx_2) = mpsc::channel(16);
+    let sink_2 = Box::new(MockSink {
+        dispatches: disp_tx_2,
+        outcomes: outc_tx_2,
+    });
+
+    let node_id_1: NodeId = "dtn://node-1/".parse().unwrap();
+    let node_id_2: NodeId = "dtn://node-2/".parse().unwrap();
+
+    // Node 1: Engine 1 with FixedDwell mode
+    let cfg_1 = Config {
+        engine_id: EngineId(1),
+        transport: TransportMode::kiss_tcp(server_addr, 0)
+            .with_dwell_time(Duration::from_millis(50)),
+        max_segment_payload_len: 1024,
+        rtt: Duration::from_millis(50),
+        ack_margin: Duration::from_millis(25),
+        checkpoint_rtx_limit: 5,
+        report_rtx_limit: 5,
+        peers: vec![PeerEntry {
+            engine_id: EngineId(2),
+            address: Some(server_addr),
+            node_id: Some(node_id_2.clone()),
+            ..Default::default()
+        }],
+    };
+    let cla_1 = LtpCla::new(cfg_1);
+    cla_1.on_register(sink_1, &[], None).await;
+
+    // Node 2: Engine 2 with FixedDwell mode
+    let cfg_2 = Config {
+        engine_id: EngineId(2),
+        transport: TransportMode::kiss_tcp(server_addr, 0)
+            .with_dwell_time(Duration::from_millis(50)),
+        max_segment_payload_len: 1024,
+        rtt: Duration::from_millis(50),
+        ack_margin: Duration::from_millis(25),
+        checkpoint_rtx_limit: 5,
+        report_rtx_limit: 5,
+        peers: vec![PeerEntry {
+            engine_id: EngineId(1),
+            address: Some(server_addr),
+            node_id: Some(node_id_1.clone()),
+            ..Default::default()
+        }],
+    };
+    let cla_2 = LtpCla::new(cfg_2);
+    cla_2.on_register(sink_2, &[], None).await;
+
+    let mut payload = vec![0u8; 8192];
+    for (i, b) in payload.iter_mut().enumerate() {
+        *b = ((i * 29) ^ 0x33) as u8;
+    }
+    let expected_hash = Sha256::digest(&payload);
+    let bundle_id = create_test_bundle_id("node-1");
+    let mut stream = Bytes::copy_from_slice(&payload);
+
+    let forward_res = cla_1
+        .forward(
+            None,
+            &ClaAddress::Tcp(server_addr),
+            &bundle_id,
+            payload.len() as u64,
+            &mut stream,
+        )
+        .await
+        .expect("KISS dwell forward succeeds");
+
+    assert!(matches!(forward_res, ForwardBundleResult::Accepted));
+
+    let (_, _, received_bytes) = tokio::time::timeout(Duration::from_secs(5), disp_rx_2.recv())
+        .await
+        .expect("dispatched bundle received")
+        .expect("stream ok");
+
+    assert_eq!(Sha256::digest(&received_bytes), expected_hash);
+
+    let (outcome_bundle_id, outcome) =
+        tokio::time::timeout(Duration::from_secs(5), outc_rx_1.recv())
+            .await
+            .expect("transfer outcome received")
+            .expect("stream ok");
+
+    assert_eq!(outcome_bundle_id, bundle_id);
+    assert_eq!(outcome, TransferOutcome::Completed);
+
+    cla_1.unregister().await;
+    cla_2.unregister().await;
 }

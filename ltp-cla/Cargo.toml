@@ -34,3 +34,4 @@ humantime = { version = "2", optional = true }
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "io-util"] }
 sha2 = "0.10"
+serde_yaml = "0.9"

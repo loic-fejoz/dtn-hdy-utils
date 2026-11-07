@@ -226,11 +226,19 @@ This demonstrates two `dtn-hdy-ham` instances interconnected via TCPCLv4:
 ## Two-Station Hamradio LTP over Mercury TNC (`stata-ltp.yaml` & `statb-ltp.yaml`)
 
 This demonstrates two `dtn-hdy-ham` instances interconnected via the LTP Convergence Layer Adapter (`hardy-ltp-cla`) using Mercury TNC KISS TCP interfaces over simulated audio channels (`launch_dual_mercury.sh`):
-- **Mercury Bridge**: Runs two Mercury TNC instances linked by an 8 kHz real-time audio FIFO bridge. Station A exposes KISS TCP on `127.0.0.1:8100`, Station B on `127.0.0.1:8500`.
+- **Mercury Bridge**: Runs two Mercury TNC instances linked by an 8 kHz real-time audio FIFO bridge with shared simplex RF channel simulation (`simplex_audio_bridge.py`). Station A exposes KISS TCP on `127.0.0.1:8100`, Station B on `127.0.0.1:8500`.
+- **Flow Control & Pacing**: Demonstrates Leaky-Bucket aggregate transmission rate limiting (`rate-limit-bytes-per-sec: 1200`) and Half-Duplex Checkpoint turnaround pacing (`half-duplex: true`, `turnaround-mode: wait-for-report`).
 - `STATA` (`examples/stata-ltp.yaml`): Node EID `dtn://stata.ampr.org/`, gRPC port `3050`, LTP Engine ID `1`, KISS TCP client connected to `127.0.0.1:8100`, peer Engine ID `2` (`dtn://statb.ampr.org/`).
 - `STATB` (`examples/statb-ltp.yaml`): Node EID `dtn://statb.ampr.org/`, gRPC port `3051`, LTP Engine ID `2`, KISS TCP client connected to `127.0.0.1:8500`, peer Engine ID `1` (`dtn://stata.ampr.org/`).
 
-### Running the demonstration:
+### Automated Simplex Test:
+
+To execute an end-to-end automated transfer across the simulated half-duplex RF channel:
+```bash
+./examples/test_simplex_mercury_ltp.sh
+```
+
+### Running the interactive demonstration:
 
 1. Launch the dual Mercury TNC bridge (from `examples/launch_dual_mercury.sh` or the `mercury` repository):
    ```bash

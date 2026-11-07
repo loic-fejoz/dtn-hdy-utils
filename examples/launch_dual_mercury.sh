@@ -91,6 +91,18 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+SIMPLEX_ARG="--simplex"
+for arg in "$@"; do
+    case "$arg" in
+        --duplex)
+            SIMPLEX_ARG="--duplex"
+            ;;
+        --simplex)
+            SIMPLEX_ARG="--simplex"
+            ;;
+    esac
+done
+
 # Démarrage des deux instances Mercury
 echo "[*] Démarrage de la Station A (STATA)..."
 "${BIN_MERCURY}" -C "${CONFIG_A}" > "${LOG_A}" 2>&1 &
@@ -101,8 +113,12 @@ echo "[*] Démarrage de la Station B (STATB)..."
 PID_B=$!
 
 # Démarrage du pont audio temps-réel (cadencé à 8000 Hz)
-echo "[*] Démarrage du pont audio temps-réel..."
-python3 "${SIM_DIR}/audio_bridge.py" "${A_TX}" "${B_RX}" "${B_TX}" "${A_RX}" > "${LOG_BRIDGE}" 2>&1 &
+echo "[*] Démarrage du pont audio temps-réel (${SIMPLEX_ARG})..."
+if [[ -x "${SCRIPT_DIR}/simplex_audio_bridge.py" || -f "${SCRIPT_DIR}/simplex_audio_bridge.py" ]]; then
+    python3 "${SCRIPT_DIR}/simplex_audio_bridge.py" "${A_TX}" "${B_RX}" "${B_TX}" "${A_RX}" "${SIMPLEX_ARG}" > "${LOG_BRIDGE}" 2>&1 &
+else
+    python3 "${SIM_DIR}/audio_bridge.py" "${A_TX}" "${B_RX}" "${B_TX}" "${A_RX}" > "${LOG_BRIDGE}" 2>&1 &
+fi
 PID_BRIDGE=$!
 
 # Attente que les ports de contrôle soient prêts
@@ -140,7 +156,7 @@ cat << EOF
     - Log                : ${LOG_B}
 
   Pont Audio (PID: ${PID_BRIDGE}):
-    - Flux cadencé à 8000 Hz (audio TX utile + silence RX continu)
+    - Flux cadencé à 8000 Hz (mode: ${SIMPLEX_ARG})
 ======================================================================
 Pour tester automatiquement le transfert d'un fichier :
   python3 test_arq_transfer.py [chemin_fichier_optionnel]
