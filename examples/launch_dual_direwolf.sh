@@ -25,6 +25,11 @@ if ! command -v direwolf >/dev/null 2>&1; then
     exit 1
 fi
 
+PID_PW=0
+PID_WP=0
+PID_PWP=0
+PW_RUNTIME_DIR=""
+
 # Détection et configuration du serveur PulseAudio / PipeWire
 if [[ -z "${PULSE_SERVER:-}" ]]; then
     PULSE_SOCK="/run/user/$(id -u)/pulse/native"
@@ -36,6 +41,46 @@ fi
 if ! command -v pactl >/dev/null 2>&1; then
     echo "[-] Erreur : L'utilitaire 'pactl' est introuvable."
     exit 1
+fi
+
+# Si le serveur PulseAudio / PipeWire n'est pas joignable, démarrage d'un serveur local temporaire
+if ! pactl info >/dev/null 2>&1; then
+    echo "[*] Aucun serveur PulseAudio/PipeWire actif détecté. Démarrage d'un serveur temporaire PipeWire..."
+    PW_RUNTIME_DIR="/tmp/pw-direwolf-$$-$(id -u)"
+    mkdir -p "${PW_RUNTIME_DIR}"
+    export XDG_RUNTIME_DIR="${PW_RUNTIME_DIR}"
+    export PULSE_COOKIE="${PW_RUNTIME_DIR}/pulse-cookie"
+
+    if command -v pipewire >/dev/null 2>&1; then
+        pipewire >/dev/null 2>&1 &
+        PID_PW=$!
+    fi
+    if command -v wireplumber >/dev/null 2>&1; then
+        wireplumber >/dev/null 2>&1 &
+        PID_WP=$!
+    fi
+    if command -v pipewire-pulse >/dev/null 2>&1; then
+        pipewire-pulse >/dev/null 2>&1 &
+        PID_PWP=$!
+    fi
+
+    export PULSE_SERVER="unix:${PW_RUNTIME_DIR}/pulse/native"
+
+    # Attente que pactl réponde
+    pw_ready=0
+    for i in {1..30}; do
+        if pactl info >/dev/null 2>&1; then
+            pw_ready=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ ${pw_ready} -eq 0 ]]; then
+        echo "[-] Erreur : Impossible d'initialiser le serveur PipeWire audio temporaire."
+        exit 1
+    fi
+    echo "[+] Serveur PipeWire temporaire opérationnel."
 fi
 
 mkdir -p "${LOG_DIR}"
@@ -80,6 +125,17 @@ cleanup() {
     if [[ -n "${MOD_B:-}" ]]; then
         pactl unload-module "${MOD_B}" 2>/dev/null || true
     fi
+
+    # Arrêt du serveur PipeWire temporaire si lancé
+    for pid in "${PID_PWP}" "${PID_WP}" "${PID_PW}"; do
+        if [[ ${pid} -gt 0 ]] && kill -0 "${pid}" 2>/dev/null; then
+            kill -TERM "${pid}" 2>/dev/null || true
+        fi
+    done
+    if [[ -n "${PW_RUNTIME_DIR}" && -d "${PW_RUNTIME_DIR}" ]]; then
+        rm -rf "${PW_RUNTIME_DIR}"
+    fi
+
     echo "[+] Environnement Direwolf arrêté proprement."
 }
 

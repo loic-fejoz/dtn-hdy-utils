@@ -1,0 +1,27 @@
+# Station A (STATA) using HQFBP over Direwolf KISS TCP (Station A KISS port 8001)
+node-id: "dtn://stata.ampr.org/"
+callsign: "STATA"
+
+storage:
+  data-dir: "/tmp/dtn-stata"
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3050"
+
+web:
+  address: "127.0.0.1:8081"
+
+clas:
+  - name: "hqfbp-direwolf-a"
+    type: "hqfbp"
+    callsign: "STATA"
+    transport:
+      type: "kiss-tcp"
+      server-addr: "127.0.0.1:8001"
+      port: 0
+      rate-limit-bytes-per-sec: 1200
+      burst-capacity-bytes: 1024
+    peers:
+      - callsign: "STATB"
+        node-id: "dtn://statb.ampr.org/"

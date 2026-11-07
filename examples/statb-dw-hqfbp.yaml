@@ -1,0 +1,27 @@
+# Station B (STATB) using HQFBP over Direwolf KISS TCP (Station B KISS port 8101)
+node-id: "dtn://statb.ampr.org/"
+callsign: "STATB"
+
+storage:
+  data-dir: "/tmp/dtn-statb"
+
+grpc:
+  enabled: true
+  address: "127.0.0.1:3051"
+
+web:
+  address: "127.0.0.1:8082"
+
+clas:
+  - name: "hqfbp-direwolf-b"
+    type: "hqfbp"
+    callsign: "STATB"
+    transport:
+      type: "kiss-tcp"
+      server-addr: "127.0.0.1:8101"
+      port: 0
+      rate-limit-bytes-per-sec: 1200
+      burst-capacity-bytes: 1024
+    peers:
+      - callsign: "STATA"
+        node-id: "dtn://stata.ampr.org/"
