@@ -262,6 +262,7 @@ export function LogsView({ incomingLog, sseStatus }: LogsViewProps) {
                 onClick={() => setSearchQuery('')}
                 class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-1"
                 title="Clear search"
+                aria-label="Clear search"
               >
                 ✕
               </button>

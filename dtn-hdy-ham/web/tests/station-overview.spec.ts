@@ -225,7 +225,7 @@ test.describe('Station Overview & Identity', () => {
 
   test('displays peer connection status badge and allows adding a static route', async ({ page }) => {
     // Check connected status badge is displayed
-    await expect(page.getByText('connected', { exact: false })).toBeVisible();
+    await expect(page.getByText('connected', { exact: true })).toBeVisible();
 
     // Click "+ Add Route" button
     await page.getByRole('button', { name: '+ Add Route' }).click();

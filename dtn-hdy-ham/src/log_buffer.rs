@@ -138,11 +138,12 @@ struct MessageVisitor {
 impl tracing::field::Visit for MessageVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         if field.name() == "message" {
-            let mut s = format!("{value:?}");
-            if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-                s = s[1..s.len() - 1].to_string();
+            let s = format!("{value:?}");
+            if let Some(stripped) = s.strip_prefix('"').and_then(|t| t.strip_suffix('"')) {
+                self.message = stripped.to_string();
+            } else {
+                self.message = s;
             }
-            self.message = s;
         } else {
             self.fields
                 .push((field.name().to_string(), format!("{value:?}")));
