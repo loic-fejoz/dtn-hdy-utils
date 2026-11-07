@@ -1,0 +1,21 @@
+[package]
+name = "cla-commons"
+description = "Common transport utilities, flow control, and rate limiting for Hardy convergence layer adapters"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["dtn", "bpv7", "convergence-layer", "flow-control", "kiss"]
+categories = ["network-programming"]
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+tokio = { version = "1", features = ["time", "sync"] }
+tracing = { version = "0.1", default-features = false }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

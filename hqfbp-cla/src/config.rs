@@ -20,6 +20,11 @@ fn default_baud_rate() -> u32 {
 }
 
 #[allow(dead_code)]
+const fn default_burst_capacity() -> usize {
+    2048
+}
+
+#[allow(dead_code)]
 fn default_hailing_encodings() -> Vec<ContentEncoding> {
     vec![ContentEncoding::H, ContentEncoding::Crc32]
 }
@@ -106,6 +111,12 @@ pub enum TransportMode {
             serde(default = "default_reconnect_max", with = "humantime_duration")
         )]
         reconnect_max: Duration,
+        /// Optional rate limit in bytes per second for the aggregate KISS stream (e.g. 1200 or 9600).
+        #[cfg_attr(feature = "serde", serde(default))]
+        rate_limit_bytes_per_sec: Option<u64>,
+        /// Maximum burst capacity in bytes for the leaky bucket. Defaults to 2048 bytes if rate limiting is enabled.
+        #[cfg_attr(feature = "serde", serde(default = "default_burst_capacity"))]
+        burst_capacity_bytes: usize,
     },
     /// KISS over asynchronous serial/TTY port (e.g. `/dev/ttyUSB0`).
     #[cfg_attr(
@@ -133,6 +144,12 @@ pub enum TransportMode {
         /// TxTail in 10ms units (KISS Command 4).
         #[cfg_attr(feature = "serde", serde(default))]
         tx_tail: Option<u8>,
+        /// Optional rate limit in bytes per second for the aggregate KISS stream (e.g. 1200 or 9600).
+        #[cfg_attr(feature = "serde", serde(default))]
+        rate_limit_bytes_per_sec: Option<u64>,
+        /// Maximum burst capacity in bytes for the leaky bucket. Defaults to 2048 bytes if rate limiting is enabled.
+        #[cfg_attr(feature = "serde", serde(default = "default_burst_capacity"))]
+        burst_capacity_bytes: usize,
     },
     /// Direct UDP datagram transport (e.g. for GNURadio flowgraphs or raw packet broadcast).
     #[cfg_attr(feature = "serde", serde(rename = "udp", rename_all = "kebab-case"))]
@@ -143,6 +160,32 @@ pub enum TransportMode {
         #[cfg_attr(feature = "serde", serde(default))]
         peer_addr: Option<SocketAddr>,
     },
+}
+
+impl TransportMode {
+    /// Configures the leaky-bucket rate limiter.
+    pub fn with_rate_limit(mut self, rate_bytes_per_sec: u64, burst_capacity: usize) -> Self {
+        match self {
+            Self::KissTcp {
+                ref mut rate_limit_bytes_per_sec,
+                ref mut burst_capacity_bytes,
+                ..
+            } => {
+                *rate_limit_bytes_per_sec = Some(rate_bytes_per_sec);
+                *burst_capacity_bytes = burst_capacity;
+            }
+            Self::KissSerial {
+                ref mut rate_limit_bytes_per_sec,
+                ref mut burst_capacity_bytes,
+                ..
+            } => {
+                *rate_limit_bytes_per_sec = Some(rate_bytes_per_sec);
+                *burst_capacity_bytes = burst_capacity;
+            }
+            _ => {}
+        }
+        self
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -378,6 +421,81 @@ mod tests {
             assert_eq!(port, 0);
         } else {
             panic!("expected KissSerial");
+        }
+
+        let paced_json = r#"{
+            "transport": {
+                "type": "kiss-tcp",
+                "server-addr": "127.0.0.1:8001",
+                "rate-limit-bytes-per-sec": 1200,
+                "burst-capacity-bytes": 4096
+            }
+        }"#;
+        let paced_cfg: Config = serde_json::from_str(paced_json).unwrap();
+        if let TransportMode::KissTcp {
+            rate_limit_bytes_per_sec,
+            burst_capacity_bytes,
+            ..
+        } = paced_cfg.transport
+        {
+            assert_eq!(rate_limit_bytes_per_sec, Some(1200));
+            assert_eq!(burst_capacity_bytes, 4096);
+        } else {
+            panic!("expected KissTcp with rate limiting");
+        }
+
+        let serial_paced_json = r#"{
+            "transport": {
+                "type": "kiss-serial",
+                "path": "/dev/ttyUSB1",
+                "rate-limit-bytes-per-sec": 300
+            }
+        }"#;
+        let serial_paced: Config = serde_json::from_str(serial_paced_json).unwrap();
+        if let TransportMode::KissSerial {
+            rate_limit_bytes_per_sec,
+            burst_capacity_bytes,
+            ..
+        } = serial_paced.transport
+        {
+            assert_eq!(rate_limit_bytes_per_sec, Some(300));
+            assert_eq!(burst_capacity_bytes, 2048); // default
+        } else {
+            panic!("expected KissSerial with rate limiting");
+        }
+
+        let fluent = TransportMode::Udp {
+            bind_addr: "127.0.0.1:10042".parse().unwrap(),
+            peer_addr: None,
+        }
+        .with_rate_limit(500, 1000);
+        assert!(matches!(fluent, TransportMode::Udp { .. }));
+
+        let fluent_tcp = TransportMode::KissTcp {
+            server_addr: "127.0.0.1:8001".parse().unwrap(),
+            bind_addr: None,
+            port: 0,
+            tx_delay: None,
+            persistence: None,
+            slot_time: None,
+            tx_tail: None,
+            reconnect_initial: Duration::from_millis(500),
+            reconnect_max: Duration::from_secs(30),
+            rate_limit_bytes_per_sec: None,
+            burst_capacity_bytes: 2048,
+        }
+        .with_rate_limit(1200, 4096);
+
+        if let TransportMode::KissTcp {
+            rate_limit_bytes_per_sec,
+            burst_capacity_bytes,
+            ..
+        } = fluent_tcp
+        {
+            assert_eq!(rate_limit_bytes_per_sec, Some(1200));
+            assert_eq!(burst_capacity_bytes, 4096);
+        } else {
+            panic!("expected KissTcp");
         }
     }
 }

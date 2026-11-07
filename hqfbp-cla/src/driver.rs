@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
+use cla_commons::pacing::LeakyBucket;
 use hardy_async::TaskPool;
 use hardy_bpa::cla::{Acceptance, ForwardBundleResult, Sink};
 use hardy_bpv7::bundle::Id;
@@ -83,6 +84,8 @@ struct KissTcpArgs {
     params: (Option<u8>, Option<u8>, Option<u8>, Option<u8>),
     reconnect_initial: Duration,
     reconnect_max: Duration,
+    rate_limit: Option<u64>,
+    burst_capacity: usize,
     addr_tx: oneshot::Sender<std::io::Result<SocketAddr>>,
 }
 
@@ -171,6 +174,8 @@ impl Driver {
                 tx_tail,
                 reconnect_initial,
                 reconnect_max,
+                rate_limit_bytes_per_sec,
+                burst_capacity_bytes,
             } => {
                 let server = *server_addr;
                 let bind = *bind_addr;
@@ -185,6 +190,8 @@ impl Driver {
                     params,
                     reconnect_initial: rec_init,
                     reconnect_max: rec_max,
+                    rate_limit: *rate_limit_bytes_per_sec,
+                    burst_capacity: *burst_capacity_bytes,
                     addr_tx,
                 };
                 self.run_kiss_tcp(args, tasks).await;
@@ -197,13 +204,19 @@ impl Driver {
                 persistence,
                 slot_time,
                 tx_tail,
+                rate_limit_bytes_per_sec,
+                burst_capacity_bytes,
             } => {
                 let p = path.clone();
                 let baud = *baud_rate;
                 let kiss_port = *port;
                 let params = (*tx_delay, *persistence, *slot_time, *tx_tail);
-                self.run_kiss_serial(p, baud, kiss_port, params, addr_tx, tasks)
-                    .await;
+                let rate_limit = *rate_limit_bytes_per_sec;
+                let burst_cap = *burst_capacity_bytes;
+                self.run_kiss_serial(
+                    p, baud, kiss_port, params, rate_limit, burst_cap, addr_tx, tasks,
+                )
+                .await;
             }
         }
     }
@@ -383,6 +396,8 @@ impl Driver {
             params,
             reconnect_initial,
             reconnect_max,
+            rate_limit,
+            burst_capacity,
             addr_tx,
         } = args;
         let mut backoff = reconnect_initial;
@@ -451,6 +466,7 @@ impl Driver {
             let (mut reader, mut writer) = stream.into_split();
             let mut kiss_decoder = KissDecoder::new();
             let mut read_buf = [0u8; 4096];
+            let mut leaky_bucket = rate_limit.map(|rate| LeakyBucket::new(rate, burst_capacity));
 
             loop {
                 tokio::select! {
@@ -499,6 +515,9 @@ impl Driver {
                                         let mut ok = true;
                                         for pdu in pdus {
                                             let kiss_frame = encode_kiss_frame(&pdu);
+                                            if let Some(ref mut shaper) = leaky_bucket {
+                                                shaper.acquire(kiss_frame.len()).await;
+                                            }
                                             if let Err(e) = writer.write_all(&kiss_frame).await {
                                                 error!("Failed to write KISS TCP frame: {e}");
                                                 ok = false;
@@ -546,12 +565,15 @@ impl Driver {
     }
 
     #[cfg(feature = "serial")]
+    #[allow(clippy::too_many_arguments)]
     async fn run_kiss_serial(
         &mut self,
         path: String,
         baud_rate: u32,
         port: u8,
         params: (Option<u8>, Option<u8>, Option<u8>, Option<u8>),
+        rate_limit: Option<u64>,
+        burst_capacity: usize,
         addr_tx: oneshot::Sender<std::io::Result<SocketAddr>>,
         _tasks: Arc<TaskPool>,
     ) {
@@ -598,6 +620,7 @@ impl Driver {
         let mut kiss_decoder = KissDecoder::new();
         let mut read_buf = [0u8; 1024];
         let mut sweep_timer = interval(self.config.sweep_interval);
+        let mut leaky_bucket = rate_limit.map(|rate| LeakyBucket::new(rate, burst_capacity));
 
         loop {
             tokio::select! {
@@ -643,6 +666,9 @@ impl Driver {
                                     let mut ok = true;
                                     for pdu in pdus {
                                         let kiss_frame = encode_kiss_frame(&pdu);
+                                        if let Some(ref mut shaper) = leaky_bucket {
+                                            shaper.acquire(kiss_frame.len()).await;
+                                        }
                                         if let Err(e) = writer.write_all(&kiss_frame).await {
                                             error!("Failed to write serial KISS frame: {e}");
                                             ok = false;
@@ -689,12 +715,15 @@ impl Driver {
     }
 
     #[cfg(not(feature = "serial"))]
+    #[allow(clippy::too_many_arguments)]
     async fn run_kiss_serial(
         &mut self,
         _path: String,
         _baud_rate: u32,
         _port: u8,
         _params: (Option<u8>, Option<u8>, Option<u8>, Option<u8>),
+        _rate_limit: Option<u64>,
+        _burst_capacity: usize,
         addr_tx: oneshot::Sender<std::io::Result<SocketAddr>>,
         _tasks: Arc<TaskPool>,
     ) {

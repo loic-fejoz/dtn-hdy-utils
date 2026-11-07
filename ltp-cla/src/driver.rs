@@ -11,6 +11,7 @@ use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, trace, warn};
 
+use cla_commons::pacing::LeakyBucket;
 use hardy_async::TaskPool;
 use hardy_bpa::cla::{Acceptance, ForwardBundleResult, Sink, TransferOutcome};
 use hardy_bpv7::bundle::Id;
@@ -128,46 +129,6 @@ fn is_report_segment(bytes: &[u8]) -> bool {
         (first & 0x0F) == 8
     } else {
         false
-    }
-}
-
-struct LeakyBucket {
-    rate_bytes_per_sec: u64,
-    burst_capacity: f64,
-    tokens: f64,
-    last_update: tokio::time::Instant,
-}
-
-impl LeakyBucket {
-    fn new(rate_bytes_per_sec: u64, burst_capacity: usize) -> Self {
-        Self {
-            rate_bytes_per_sec,
-            burst_capacity: burst_capacity as f64,
-            tokens: burst_capacity as f64,
-            last_update: tokio::time::Instant::now(),
-        }
-    }
-
-    async fn acquire(&mut self, bytes_len: usize) {
-        if self.rate_bytes_per_sec == 0 {
-            return;
-        }
-        let now = tokio::time::Instant::now();
-        let elapsed = now.duration_since(self.last_update).as_secs_f64();
-        self.tokens =
-            (self.tokens + elapsed * (self.rate_bytes_per_sec as f64)).min(self.burst_capacity);
-        self.last_update = now;
-
-        let cost = bytes_len as f64;
-        if self.tokens < cost {
-            let deficit = cost - self.tokens;
-            let wait_secs = deficit / (self.rate_bytes_per_sec as f64);
-            tokio::time::sleep(Duration::from_secs_f64(wait_secs)).await;
-            self.tokens = 0.0;
-            self.last_update = tokio::time::Instant::now();
-        } else {
-            self.tokens -= cost;
-        }
     }
 }
 

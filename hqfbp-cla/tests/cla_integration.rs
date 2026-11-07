@@ -4,6 +4,8 @@ use std::time::Duration;
 use std::vec::Vec;
 
 use bytes::Bytes;
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 use hardy_bpa::async_trait;
@@ -187,4 +189,104 @@ async fn test_hqfbp_cla_udp_loopback_and_dynamic_encoding() {
     // Clean unregister
     cla_a.unregister().await;
     cla_b.unregister().await;
+}
+
+#[tokio::test]
+async fn test_hqfbp_cla_kiss_tcp_leaky_bucket_pacing() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = listener.local_addr().unwrap();
+
+    let (tx_a, _rx_a) = mpsc::channel(16);
+    let sink_a = Box::new(MockSink { dispatches: tx_a });
+
+    // Configure HQFBP CLA with KISS TCP and rate limiting: 2,000 bytes/sec, 500 byte burst capacity
+    let cfg = Config {
+        callsign: Some("F4JXQ".to_string()),
+        transport: TransportMode::KissTcp {
+            server_addr,
+            bind_addr: None,
+            port: 0,
+            tx_delay: None,
+            persistence: None,
+            slot_time: None,
+            tx_tail: None,
+            reconnect_initial: Duration::from_millis(100),
+            reconnect_max: Duration::from_millis(500),
+            rate_limit_bytes_per_sec: Some(2000),
+            burst_capacity_bytes: 500,
+        },
+        hailing_encodings: vec![ContentEncoding::H, ContentEncoding::Crc32],
+        default_bundle_encodings: vec![
+            ContentEncoding::Chunk(128),
+            ContentEncoding::H,
+            ContentEncoding::Crc32,
+        ],
+        initial_msg_id: 1,
+        peers: Vec::new(),
+        max_concurrent_senders: 10,
+        max_in_flight_bytes: 1024 * 1024,
+        session_ttl: Duration::from_secs(60),
+        sweep_interval: Duration::from_secs(1),
+    };
+
+    let cla = HqfbpCla::new(cfg);
+    cla.on_register(sink_a, &[], None).await;
+
+    // Accept incoming connection on mock KISS server
+    let (mut socket, _) = listener.accept().await.unwrap();
+
+    // Prepare a 1600-byte bundle payload (which generates ~14 frames exceeding the 500-byte burst)
+    let payload_data = vec![0x42u8; 1600];
+    let bundle_data = Bytes::from(payload_data);
+    let mut stream = bundle_data.clone();
+    let dest_addr = callsign_to_cla_address("N0CALL");
+    let bundle_id = Id::default();
+
+    let start = tokio::time::Instant::now();
+
+    // Spawn server reader to drain bytes from socket concurrently until connection is closed
+    let reader_handle = tokio::spawn(async move {
+        let mut total_bytes = 0usize;
+        let mut buf = [0u8; 512];
+        while let Ok(n) = socket.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            total_bytes += n;
+        }
+        total_bytes
+    });
+
+    let outcome = cla
+        .forward(
+            None,
+            &dest_addr,
+            &bundle_id,
+            bundle_data.len() as u64,
+            &mut stream,
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(outcome, ForwardBundleResult::Sent));
+
+    let elapsed = start.elapsed();
+
+    // 1600+ bytes with 500 byte initial burst at 2000 B/s requires at least (1600 - 500) / 2000 = ~550 ms
+    assert!(
+        elapsed >= Duration::from_millis(500),
+        "Paced transfer should take at least 500ms, took {elapsed:?}"
+    );
+
+    cla.unregister().await;
+
+    let total_read = tokio::time::timeout(Duration::from_secs(2), reader_handle)
+        .await
+        .expect("reader timed out")
+        .expect("reader failed");
+
+    assert!(
+        total_read >= 1600,
+        "All generated frame bytes should have been received by the KISS peer, got {total_read}"
+    );
 }

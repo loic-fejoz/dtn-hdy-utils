@@ -539,6 +539,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cla-commons"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "clap"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1592,6 +1600,7 @@ name = "hardy-hqfbp-cla"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "cla-commons",
  "hardy-async",
  "hardy-bpa",
  "hardy-bpv7",
@@ -1657,6 +1666,7 @@ name = "hardy-ltp-cla"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "cla-commons",
  "hardy-async",
  "hardy-bpa",
  "hardy-bpv7",

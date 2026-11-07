@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     ".",
+    "cla-commons",
     "ltp",
     "ltp/fuzz",
     "ltp-cla",
