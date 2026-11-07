@@ -271,23 +271,32 @@ flowchart TD
 
 ---
 
-### Phase 4: Real-Time Event Push & Live Tracing Console (`SYSTEM_LOG`)
-> **Goal**: Eliminate manual refreshing and provide live observability into radio links, bundle receptions, and daemon diagnostics.
+### Phase 4: Real-Time Event Push & Live Tracing Console (`SYSTEM_LOG`) (Completed)
+> **Goal**: Eliminate manual refreshing and provide live observability into radio links, bundle receptions, and daemon diagnostics (ADR 0018).
 
 #### Deliverables:
-1. **Server-Sent Events (SSE) Stream (`GET /api/v1/events`)**:
+1. [x] **Server-Sent Events (SSE) Stream (`GET /api/v1/events`) & In-Memory Ring Buffer**:
+   * Standard `stderr` output preserved for Docker/systemd alongside a 500-entry in-memory ring buffer (`LogBufferLayer`).
+   * `GET /api/v1/logs`: Returns initial 500-entry history snapshot.
+   * `GET /api/v1/events?logs=true`: Streams real-time tracing logs without flooding non-log tabs.
    * Broadcast real-time events to connected browser tabs:
-     * `bundle_received`: New incoming bundle stored.
-     * `bundle_forwarded`: Bundle dispatched over CLA.
-     * `cla_state_changed`: Mercury/LTP/TCPCL connection opened or closed.
-     * `contact_window`: Schedule coordinator opened or closed a contact window.
+     * `services_update`: Active DTN services registered via gRPC or built-in.
+     * `bundles_update`: New incoming bundle stored or evicted.
+     * `chat_message`: Real-time chat message broadcast.
+     * `file_received`: Real-time file reception broadcast.
+     * `cla_state_changed`: CLA connection state transitions (Connected, Disconnected, Error).
+     * `contact_window`: Schedule coordinator contact window opening or closing.
      * `log_entry`: Live tracing records (`tracing-subscriber` layer).
-2. **Frontend Reactive State**:
-   * Preact signals or state automatically updating Chat and Bundle lists on incoming SSE events.
-   * Unread notification badges on tabs.
-3. **System Log Console View (`/logs`)**:
-   * Live streaming log viewer with level filtering (TRACE, DEBUG, INFO, WARN, ERROR).
-   * Search filter, pause/resume auto-scroll, and export to text file.
+2. [x] **Frontend Reactive State & Non-Intrusive Audio Chime**:
+   * Preact reactive state automatically updating Chat, Files, Bundles, and active services without manual page reload.
+   * Unread notification badges on tabs updated in real time.
+   * Synthesized audio chime using standard Web Audio API (`AudioContext`) with operator toggle (🔔/🔕) in navigation bar.
+   * Live SSE connection health badge (🟢 Live, 🔴 Disconnected, 🟡 Connecting) in navigation bar.
+3. [x] **System Log Console View (`/logs`) (`LogsView.tsx`)**:
+   * Live streaming terminal viewer with level filtering (ALL, INFO, WARN, ERROR, DEBUG, TRACE).
+   * Real-time text search filter across messages, severity, and module targets.
+   * Smart auto-scroll with pause on user scroll-up and resume toggle.
+   * Local clear button and export/download to text file (`dtn-logs-<date>.txt`).
 
 ---
 
