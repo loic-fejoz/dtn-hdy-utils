@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#0d9488" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Background rounded canvas -->
+  <rect width="512" height="512" rx="104" fill="url(#bgGrad)" />
+
+  <!-- Radio wave circles -->
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" opacity="0.85">
+    <path d="M196 172 A90 90 0 0 1 316 172" stroke-width="18" />
+    <path d="M152 128 A150 150 0 0 1 360 128" stroke-width="20" opacity="0.6" />
+    <path d="M108 84 A210 210 0 0 1 404 84" stroke-width="22" opacity="0.35" />
+  </g>
+
+  <!-- Central Radio Mast & Antenna Core -->
+  <g filter="url(#shadow)" fill="#ffffff">
+    <!-- Top beacon / transmitter sphere -->
+    <circle cx="256" cy="216" r="28" />
+
+    <!-- Antenna mast structure -->
+    <path d="M251 240 L242 410 L270 410 L261 240 Z" />
+    <path d="M220 410 L292 410 L286 424 L226 424 Z" />
+    <!-- Cross struts -->
+    <path d="M236 320 L276 320" stroke="#ffffff" stroke-width="10" stroke-linecap="round" />
+    <path d="M228 370 L284 370" stroke="#ffffff" stroke-width="12" stroke-linecap="round" />
+    <path d="M242 320 L282 370" stroke="#ffffff" stroke-width="8" stroke-linecap="round" />
+    <path d="M270 320 L230 370" stroke="#ffffff" stroke-width="8" stroke-linecap="round" />
+
+    <!-- Satellite / Dish reflector element -->
+    <path d="M180 226 C180 178 332 178 332 226 C310 212 202 212 180 226 Z" opacity="0.9" />
+  </g>
+</svg>

@@ -8,6 +8,13 @@ import { ChatView, ChatMessage } from './components/ChatView';
 import { FilesView } from './components/FilesView';
 import { LogsView, LogRecord } from './components/LogsView';
 import { playChime } from './utils/audio';
+import {
+  subscribePwaInstall,
+  promptPwaInstall,
+  subscribePwaUpdate,
+  applyPwaUpdate,
+  subscribeNetworkStatus,
+} from './utils/pwa';
 
 function parseHash(hash: string): {
   tab: 'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs';
@@ -69,6 +76,30 @@ export function App() {
 
   const [sseStatus, setSseStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
   const [incomingLog, setIncomingLog] = useState<LogRecord | null>(null);
+
+  // PWA & Network status states
+  const [canInstall, setCanInstall] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+
+  useEffect(() => {
+    const unsubInstall = subscribePwaInstall(setCanInstall);
+    const unsubUpdate = subscribePwaUpdate(() => setUpdateAvailable(true));
+    const unsubNet = subscribeNetworkStatus(setIsOnline);
+
+    return () => {
+      unsubInstall();
+      unsubUpdate();
+      unsubNet();
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    const installed = await promptPwaInstall();
+    if (installed) {
+      setCanInstall(false);
+    }
+  };
 
   // Sync state with browser hash navigation
   useEffect(() => {
@@ -147,7 +178,7 @@ export function App() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setServices(data);
-    } catch (err: any) {
+    } catch (err) {
       console.warn('Failed to fetch services', err);
     }
   };
@@ -310,6 +341,30 @@ export function App() {
         Skip to main content
       </a>
 
+      {/* Offline Status Warning Banner */}
+      {!isOnline && (
+        <div class="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-semibold text-center flex items-center justify-center space-x-2 shadow-sm">
+          <span>📡</span>
+          <span>Mode hors-ligne actif — Consultation locale des messages et fichiers mis en cache.</span>
+        </div>
+      )}
+
+      {/* PWA Update Banner */}
+      {updateAvailable && (
+        <div class="bg-emerald-600 text-white px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-md">
+          <div class="flex items-center space-x-2">
+            <span>⚡</span>
+            <span>Une nouvelle version de l'application est disponible.</span>
+          </div>
+          <button
+            onClick={applyPwaUpdate}
+            class="px-3 py-1 bg-white text-emerald-800 rounded text-xs font-bold hover:bg-emerald-50 transition-colors shadow-xs"
+          >
+            Mettre à jour
+          </button>
+        </div>
+      )}
+
       <Navbar
         activeTab={activeTab}
         onTabChange={navigateToTab}
@@ -322,9 +377,12 @@ export function App() {
         nodeId={config?.node_id}
         unreadChatCount={unreadChatTotal}
         unreadFilesCount={unreadFilesTotal}
+        canInstall={canInstall}
+        onInstall={handleInstallClick}
       />
 
-      <main id="main-content" class="flex-1" tabIndex={-1}>
+      {/* Main content with bottom padding for mobile navigation bar */}
+      <main id="main-content" class="flex-1 pb-20 md:pb-6" tabIndex={-1}>
         {activeTab === 'config' ? (
           <ConfigView
             config={config}
@@ -369,7 +427,7 @@ export function App() {
         )}
       </main>
 
-      <footer class="py-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400 font-mono">
+      <footer class="hidden md:block py-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400 font-mono">
         DTN Hardy Ham BPA · Amateur Radio DTN BPv7 (RFC 9171) Web Console
       </footer>
     </div>

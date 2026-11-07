@@ -130,7 +130,7 @@ test.describe('Interactive Chat Service & Messenger', () => {
 
   test('renders Chat tab in Navbar with unread badge and switches to ChatView', async ({ page }) => {
     // Find Chat button in navbar
-    const chatTabBtn = page.locator('nav button', { hasText: 'Chat' });
+    const chatTabBtn = page.locator('header nav button', { hasText: 'Chat' });
     await expect(chatTabBtn).toBeVisible();
 
     // Verify unread badge is 2
@@ -145,7 +145,7 @@ test.describe('Interactive Chat Service & Messenger', () => {
   });
 
   test('displays conversation list and thread messages', async ({ page }) => {
-    await page.locator('nav button', { hasText: 'Chat' }).click();
+    await page.locator('header nav button', { hasText: 'Chat' }).click();
 
     // Verify left sidebar lists full EID for conversations
     await expect(page.locator('aside', { hasText: 'dtn://f4jxq/chat' })).toBeVisible();
@@ -188,7 +188,7 @@ test.describe('Interactive Chat Service & Messenger', () => {
       }
     });
 
-    await page.locator('nav button', { hasText: 'Chat' }).click();
+    await page.locator('header nav button', { hasText: 'Chat' }).click();
     await page.locator('aside button', { hasText: 'dtn://f4jxq/chat' }).click();
 
     // Verify lifetime input field defaults to 3600s (1h)
@@ -259,7 +259,7 @@ test.describe('Interactive Chat Service & Messenger', () => {
       }
     });
 
-    await page.locator('nav button', { hasText: 'Chat' }).click();
+    await page.locator('header nav button', { hasText: 'Chat' }).click();
 
     // Click + New Chat button
     await page.locator('button', { hasText: '+ New Chat' }).click();
@@ -320,7 +320,7 @@ test.describe('Interactive Chat Service & Messenger', () => {
       }
     });
 
-    await page.locator('nav button', { hasText: 'Chat' }).click();
+    await page.locator('header nav button', { hasText: 'Chat' }).click();
     await page.locator('button', { hasText: '+ New Chat' }).click();
 
     const input = page.locator('input[placeholder*="F4JXQ"]');

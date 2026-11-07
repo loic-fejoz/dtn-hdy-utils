@@ -22,3 +22,4 @@ This directory contains records of the major architectural and design decisions 
 16. [ADR 16: Application Storage Quota, LRU Eviction Cascade & Visual Lifetime Expiration](0016-application-storage-quota-and-visual-expiration.md)
 17. [ADR 17: Unified Static Release Packaging and Out-of-the-Box Distribution](0017-unified-static-release-packaging.md)
 18. [ADR 18: Real-Time Event Push (SSE) & In-Browser System Log Console](0018-real-time-sse-and-system-log-console.md)
+19. [ADR 19: Progressive Web App (PWA) & Field Mobile Ergonomics](0019-pwa-and-field-mobile-ergonomics.md)
