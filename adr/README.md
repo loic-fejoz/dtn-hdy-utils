@@ -24,3 +24,4 @@ This directory contains records of the major architectural and design decisions 
 18. [ADR 18: Real-Time Event Push (SSE) & In-Browser System Log Console](0018-real-time-sse-and-system-log-console.md)
 19. [ADR 19: Progressive Web App (PWA) & Field Mobile Ergonomics](0019-pwa-and-field-mobile-ergonomics.md)
 20. [ADR 20: BPSec BIB Authentication, Directional Keystore & In-Browser Key Management](0020-bpsec-bib-authentication-and-keystore.md)
+21. [ADR 21: RFC 8428 SenML Telemetry Ingestion, SQLite Normalization, Open MCT API & Interactive Dashboard](0021-senml-telemetry-gateway-and-dashboard.md)

@@ -72,6 +72,7 @@ async fn test_files_service_workflow_and_degraded_cases() {
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
         keystore: server.keystore(),
+        senml_manager: server.senml_manager(),
     };
     let app = create_router(state);
 
@@ -443,6 +444,7 @@ async fn test_files_payload_range_requests_and_mime_detection() {
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
         keystore: server.keystore(),
+        senml_manager: server.senml_manager(),
     };
     let app = create_router(app_state);
 

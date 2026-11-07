@@ -33,6 +33,7 @@ pub struct HamServer {
     web_injector: Option<WebBundleInjector>,
     cla_manager: crate::cla_manager::ClaManager,
     chat_manager: crate::chat_manager::ChatManager,
+    senml_manager: crate::senml::SenmlManager,
     route_manager: Arc<crate::routing::RouteManager>,
     keystore: Arc<crate::security::DirectionalKeyStore>,
     _ephemeral_dir: Option<tempfile::TempDir>,
@@ -456,6 +457,21 @@ impl HamServer {
             )?)
         };
 
+        // SenML telemetry storage setup
+        let senml_storage = if config.storage.in_memory {
+            crate::senml::SenmlStorage::new(None, config.config_path.clone())?
+        } else {
+            let data_dir = config.storage.effective_data_dir();
+            let senml_db_path = data_dir.join("senml.db");
+            crate::senml::SenmlStorage::new(Some(&senml_db_path), config.config_path.clone())?
+        };
+
+        if let Some(ref senml_cfg) = config.senml {
+            senml_storage.sync_initial_config(&senml_cfg.metrics)?;
+        }
+
+        let senml_manager = crate::senml::SenmlManager::new(senml_storage);
+
         Ok(Self {
             config,
             bpa,
@@ -466,6 +482,7 @@ impl HamServer {
             web_injector,
             cla_manager,
             chat_manager,
+            senml_manager,
             route_manager,
             keystore,
             _ephemeral_dir: ephemeral_dir,
@@ -534,6 +551,29 @@ impl HamServer {
             }
             Err(e) => {
                 warn!("Failed to register built-in Files service: {}", e);
+            }
+        }
+
+        // Register permanent built-in SenML service
+        let senml_service = Arc::new(crate::senml::SenmlService::new(
+            self.senml_manager.clone(),
+            self.service_tracker.clone(),
+            self.keystore.clone(),
+        ));
+        let senml_service_id = hardy_bpv7::eid::Service::Dtn("senml".into());
+        match self
+            .service_tracker
+            .register_service_with_type(senml_service_id, senml_service, "Built-in SenML")
+            .await
+        {
+            Ok(eid) => {
+                info!(
+                    "Registered permanent built-in SenML service at EID: {}",
+                    eid
+                );
+            }
+            Err(e) => {
+                warn!("Failed to register built-in SenML service: {}", e);
             }
         }
 
@@ -643,6 +683,7 @@ impl HamServer {
                 route_manager: self.route_manager.clone(),
                 log_buffer: crate::log_buffer::LogBuffer::global(),
                 keystore: self.keystore.clone(),
+                senml_manager: self.senml_manager.clone(),
             };
             let cancel = self.tasks.cancel_token().clone();
             let addr = web_config.address;
@@ -729,5 +770,11 @@ impl HamServer {
     #[must_use]
     pub fn keystore(&self) -> Arc<crate::security::DirectionalKeyStore> {
         self.keystore.clone()
+    }
+
+    /// Accessor for the SenML telemetry manager.
+    #[must_use]
+    pub fn senml_manager(&self) -> crate::senml::SenmlManager {
+        self.senml_manager.clone()
     }
 }

@@ -109,18 +109,20 @@ export function ChatView({
     try {
       const res = await fetch('/api/v1/chat/conversations');
       if (res.ok) {
-        const data: ConversationSummary[] = await res.json();
-        setConversations(data);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setConversations(data);
 
-        // Update total unread
-        const totalUnread = data.reduce((acc, c) => acc + c.unread_count, 0);
-        if (onUnreadTotalChange) {
-          onUnreadTotalChange(totalUnread);
-        }
+          // Update total unread
+          const totalUnread = data.reduce((acc, c) => acc + (c.unread_count || 0), 0);
+          if (onUnreadTotalChange) {
+            onUnreadTotalChange(totalUnread);
+          }
 
-        // Auto-select first conversation if none selected and on desktop
-        if (!keepSelection && !selectedPeer && data.length > 0 && window.innerWidth >= 768) {
-          selectConversation(data[0].peer);
+          // Auto-select first conversation if none selected and on desktop
+          if (!keepSelection && !selectedPeer && data.length > 0 && window.innerWidth >= 768) {
+            selectConversation(data[0].peer);
+          }
         }
       }
     } catch (e: any) {
@@ -135,15 +137,17 @@ export function ChatView({
     try {
       const res = await fetch(`/api/v1/chat/messages?peer=${encodeURIComponent(peer)}`);
       if (res.ok) {
-        const data: ChatMessage[] = await res.json();
-        setMessages(data);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setMessages(data);
+        }
 
-        // Mark as read immediately on viewing
-        await fetch('/api/v1/chat/read', {
+        // Mark as read immediately on viewing (ignore if offline)
+        fetch('/api/v1/chat/read', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ peer }),
-        });
+        }).catch(() => {});
 
         // Update local unread status for this conversation
         setConversations((prev) =>

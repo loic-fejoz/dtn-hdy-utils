@@ -41,12 +41,20 @@ We transform the `dtn-hdy-ham` web interface into an installable, offline-resili
 
 ### 4. Field Touch Ergonomics & Thumb-Friendly Navigation
 - **Responsive Layout Split**:
-  - **Desktop / Wide Tablet (≥ 768px)**: Retains the top horizontal navigation bar.
-  - **Smartphone / Narrow Touchscreen (< 768px)**:
-    - **Compact Top Header**: Displays station callsign, network/SSE status badge, audio alert toggle, and theme switch.
-    - **Bottom Navigation Bar (Thumb Zone)**: Fixed bottom bar containing the 6 main tabs (`Config`, `Chat`, `Files`, `Bundles`, `Send`, `Logs`) with generous touch targets (≥ 44×44 px) and padding accommodating modern home gesture bars (`safe-area-inset-bottom`).
+  - **Desktop / Wide Tablet (≥ 640px)**: Retains the top horizontal navigation bar.
+  - **Smartphone / Narrow Touchscreen (< 640px)**:
+    - **Compact Top Header**: Displays station callsign, network/SSE status badge, audio alert toggle, notification toggle, and theme switch.
+    - **Bottom Navigation Bar (Thumb Zone)**: Fixed bottom bar containing the main tabs (`Config`, `Chat`, `Files`, `Bundles`, `Send`, `Logs`) with generous touch targets (≥ 48×48 px) and padding accommodating modern home gesture bars (`safe-area-inset-bottom`) suitable for gloved operation.
 - **Offline Network Status Banner**:
   - Displays a visual warning when the device loses connection with the node, clarifying that the app is in offline consultation mode.
+
+### 5. Web Notification API for Background Message Alerts
+- **Operator Background Awareness**:
+  - Field operators monitoring emergency frequencies or handling radio gear may switch apps or lock the screen.
+  - Integration of the standard browser `Notification` API:
+    - Explicit opt-in button in navbar/settings.
+    - Triggers native desktop/mobile system notifications on incoming chat messages when document visibility is hidden (`document.visibilityState === 'hidden'`).
+    - Clicking the notification immediately focuses the app window and switches to the active chat thread.
 
 ## Consequences
 - Operators can install the console directly from their browser with native app behavior and zero app-store friction.

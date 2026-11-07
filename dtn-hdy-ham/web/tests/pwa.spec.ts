@@ -62,7 +62,7 @@ test.describe('PWA & Field Mobile Ergonomics', () => {
     await expect(appleCapable).toHaveAttribute('content', 'yes');
   });
 
-  test('renders mobile bottom navigation bar with >= 44px touch targets on smartphone viewport', async ({
+  test('renders mobile bottom navigation bar with >= 48px touch targets on smartphone viewport', async ({
     page,
   }) => {
     // Set viewport to mobile smartphone dimensions
@@ -78,7 +78,8 @@ test.describe('PWA & Field Mobile Ergonomics', () => {
       const btn = mobileNav.getByRole('button', { name: label });
       await expect(btn).toBeVisible();
       const box = await btn.boundingBox();
-      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBeGreaterThanOrEqual(48);
+      expect(box?.width).toBeGreaterThanOrEqual(48);
     }
 
     // Switch to Chat using bottom bar
@@ -88,6 +89,36 @@ test.describe('PWA & Field Mobile Ergonomics', () => {
     // Switch to Logs using bottom bar
     await mobileNav.getByRole('button', { name: 'Logs' }).click();
     await expect(page).toHaveURL(/#\/logs/);
+  });
+
+  test('toggles web notifications button in navbar and requests permission', async ({ page }) => {
+    // Mock Notification API in window
+    await page.addInitScript(() => {
+      let permissionState: NotificationPermission = 'default';
+      (window as any).Notification = class MockNotification {
+        static get permission() {
+          return permissionState;
+        }
+        static requestPermission() {
+          permissionState = 'granted';
+          return Promise.resolve(permissionState);
+        }
+        constructor(public title: string, public options?: any) {}
+      };
+    });
+
+    await page.goto('/');
+
+    // Notification button initially present with 'Activer les notifications'
+    const notifBtn = page.getByRole('button', { name: /Activer les notifications système/i });
+    await expect(notifBtn).toBeVisible();
+
+    // Click to request permission and enable
+    await notifBtn.click();
+
+    // Now button switches to 'Désactiver les notifications'
+    const disableBtn = page.getByRole('button', { name: /Désactiver les notifications système/i });
+    await expect(disableBtn).toBeVisible();
   });
 
   test('shows offline banner when device goes offline', async ({ page }) => {

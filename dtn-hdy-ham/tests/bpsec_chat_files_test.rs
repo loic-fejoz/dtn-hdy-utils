@@ -85,6 +85,7 @@ async fn test_bpsec_chat_signing_and_verification_pipeline() {
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
         keystore: server.keystore(),
+        senml_manager: server.senml_manager(),
     };
     let app = create_router(app_state);
 

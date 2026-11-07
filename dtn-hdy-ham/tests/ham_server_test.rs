@@ -218,6 +218,7 @@ async fn test_ham_web_api_routes() {
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
         keystore: server.keystore(),
+        senml_manager: server.senml_manager(),
     };
     let app = create_router(state);
 

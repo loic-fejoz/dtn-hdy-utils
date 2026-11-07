@@ -1,0 +1,21 @@
+callsign: "STATB"
+node-id: "dtn://statb/"
+storage:
+  in-memory: true
+grpc:
+  enabled: true
+  address: "127.0.0.1:25052"
+web:
+  address: "127.0.0.1:28082"
+clas:
+  - name: "tcpcl-statb"
+    type: "tcpclv4"
+    address: "127.0.0.1:24552"
+    require-tls: false
+routes:
+  - pattern: "dtn://stata/*"
+    cla: "tcpcl-statb"
+    next-hop: "dtn://stata/"
+rfc9171-validity:
+  primary-block-integrity: false
+  bundle-age-required: false

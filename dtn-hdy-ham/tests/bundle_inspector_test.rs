@@ -67,6 +67,7 @@ async fn test_bundle_inspector_endpoints_and_lifecycle() {
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
         keystore: server.keystore(),
+        senml_manager: server.senml_manager(),
     };
     let app = create_router(state);
 
@@ -290,6 +291,7 @@ async fn test_in_memory_bundle_inspector_and_connect_peer() {
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
         keystore: server.keystore(),
+        senml_manager: server.senml_manager(),
     };
     let app = create_router(state);
 

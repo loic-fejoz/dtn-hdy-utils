@@ -1,12 +1,16 @@
 import { h } from 'preact';
+import { NotificationPermissionState } from '../utils/notifications';
 
 interface NavbarProps {
-  activeTab: 'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs';
-  onTabChange: (tab: 'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs') => void;
+  activeTab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs';
+  onTabChange: (tab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs') => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   soundEnabled: boolean;
   onToggleSound: () => void;
+  notificationPermission?: NotificationPermissionState;
+  notificationEnabled?: boolean;
+  onToggleNotification?: () => void;
   sseStatus: 'connected' | 'disconnected' | 'connecting';
   stationCallsign?: string;
   nodeId?: string;
@@ -23,6 +27,9 @@ export function Navbar({
   onToggleDarkMode,
   soundEnabled,
   onToggleSound,
+  notificationPermission = 'unsupported',
+  notificationEnabled = false,
+  onToggleNotification,
   sseStatus,
   stationCallsign,
   nodeId,
@@ -35,6 +42,7 @@ export function Navbar({
     { id: 'config' as const, label: 'Configuration', shortLabel: 'Config', icon: '⚙️' },
     { id: 'chat' as const, label: 'Chat', shortLabel: 'Chat', icon: '💬', count: unreadChatCount },
     { id: 'files' as const, label: 'Files', shortLabel: 'Files', icon: '📁', count: unreadFilesCount },
+    { id: 'senml' as const, label: 'SenML', shortLabel: 'SenML', icon: '📊' },
     { id: 'bundles' as const, label: 'Bundles', shortLabel: 'Bundles', icon: '📦' },
     { id: 'send' as const, label: 'Send Bundle', shortLabel: 'Send', icon: '✉️' },
     { id: 'logs' as const, label: 'Logs', shortLabel: 'Logs', icon: '📟' },
@@ -137,12 +145,44 @@ export function Navbar({
               </button>
             )}
 
+            {/* Web Push / Desktop Notification toggle */}
+            {notificationPermission !== 'unsupported' && (
+              <button
+                onClick={onToggleNotification}
+                title={
+                  notificationPermission === 'denied'
+                    ? 'Notifications système bloquées par le navigateur (modifier dans les paramètres du site)'
+                    : notificationEnabled
+                    ? 'Désactiver les notifications système en arrière-plan'
+                    : 'Activer les notifications système en arrière-plan'
+                }
+                aria-label={
+                  notificationPermission === 'denied'
+                    ? 'Notifications système bloquées'
+                    : notificationEnabled
+                    ? 'Désactiver les notifications système'
+                    : 'Activer les notifications système'
+                }
+                class={`p-2 rounded-lg transition-colors min-h-[48px] min-w-[48px] flex items-center justify-center ${
+                  notificationPermission === 'denied'
+                    ? 'text-rose-400 opacity-60 cursor-not-allowed hover:bg-rose-50 dark:hover:bg-rose-950/30'
+                    : notificationEnabled
+                    ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50'
+                    : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
+                }`}
+              >
+                <span aria-hidden="true" class="text-base">
+                  {notificationPermission === 'denied' ? '🚫' : notificationEnabled ? '📢' : '📣'}
+                </span>
+              </button>
+            )}
+
             {/* Sound Notification toggle */}
             <button
               onClick={onToggleSound}
               title={soundEnabled ? 'Disable audio notification chime' : 'Enable audio notification chime on incoming messages'}
               aria-label={soundEnabled ? 'Disable audio notification chime' : 'Enable audio notification chime on incoming messages'}
-              class={`p-2 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center ${
+              class={`p-2 rounded-lg transition-colors min-h-[48px] min-w-[48px] flex items-center justify-center ${
                 soundEnabled
                   ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50'
@@ -157,7 +197,7 @@ export function Navbar({
               title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-pressed={darkMode}
-              class="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+              class="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors min-h-[48px] min-w-[48px] flex items-center justify-center"
             >
               <span aria-hidden="true" class="text-base">{darkMode ? '☀️' : '🌙'}</span>
             </button>
@@ -177,7 +217,7 @@ export function Navbar({
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
               aria-current={isActive ? 'page' : undefined}
-              class={`flex-1 flex flex-col items-center justify-center py-1 min-h-[44px] min-w-[44px] text-[11px] font-medium transition-colors relative ${
+              class={`flex-1 flex flex-col items-center justify-center py-1 min-h-[48px] min-w-[48px] text-[11px] font-medium transition-colors relative ${
                 isActive
                   ? 'text-emerald-600 dark:text-emerald-400 font-bold'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'

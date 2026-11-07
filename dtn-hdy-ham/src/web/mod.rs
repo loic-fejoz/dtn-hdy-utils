@@ -9,7 +9,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, Method, header};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
@@ -29,6 +29,7 @@ pub struct AppState {
     pub route_manager: Arc<crate::routing::RouteManager>,
     pub log_buffer: Arc<crate::log_buffer::LogBuffer>,
     pub keystore: Arc<crate::security::DirectionalKeyStore>,
+    pub senml_manager: crate::senml::SenmlManager,
 }
 
 /// Builds the Axum router with API endpoints and SPA static asset fallback.
@@ -129,7 +130,24 @@ pub fn create_router(state: AppState) -> Router {
             "/security/keys",
             get(routes::security::list_keys).post(routes::security::add_key),
         )
-        .route("/security/keys/{id}", delete(routes::security::delete_key));
+        .route("/security/keys/{id}", delete(routes::security::delete_key))
+        .route("/senml/metrics", get(routes::senml::get_metrics))
+        .route(
+            "/senml/metrics/latest",
+            get(routes::senml::get_latest_metrics),
+        )
+        .route("/senml/history", get(routes::senml::get_history))
+        .route("/senml/stream", get(routes::senml::get_stream))
+        .route(
+            "/senml/dashboard/cards",
+            get(routes::senml::get_dashboard_cards)
+                .post(routes::senml::add_dashboard_card)
+                .delete(routes::senml::clear_dashboard_cards),
+        )
+        .route(
+            "/senml/dashboard/cards/{id}",
+            put(routes::senml::update_dashboard_card).delete(routes::senml::remove_dashboard_card),
+        );
 
     if static_dir.exists() {
         info!(

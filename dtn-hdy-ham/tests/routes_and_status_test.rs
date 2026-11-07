@@ -53,6 +53,7 @@ routes:
         route_manager: route_manager.clone(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
         keystore: server.keystore(),
+        senml_manager: server.senml_manager(),
     };
     let app = create_router(state);
 

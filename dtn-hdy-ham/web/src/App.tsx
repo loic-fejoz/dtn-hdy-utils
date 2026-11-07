@@ -1,13 +1,22 @@
 import { h } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { Navbar } from './components/Navbar';
 import { ConfigView, StationConfig, ActiveService } from './components/ConfigView';
 import { BundlesView } from './components/BundlesView';
 import { SendBundleView } from './components/SendBundleView';
 import { ChatView, ChatMessage } from './components/ChatView';
 import { FilesView } from './components/FilesView';
+import { SenmlView } from './components/SenmlView';
 import { LogsView, LogRecord } from './components/LogsView';
 import { playChime } from './utils/audio';
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  isNotificationEnabled,
+  setNotificationEnabled as persistNotificationEnabled,
+  sendWebNotification,
+  NotificationPermissionState,
+} from './utils/notifications';
 import {
   subscribePwaInstall,
   promptPwaInstall,
@@ -17,7 +26,7 @@ import {
 } from './utils/pwa';
 
 function parseHash(hash: string): {
-  tab: 'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs';
+  tab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs';
   fileId: string | null;
   destination: string | null;
 } {
@@ -37,6 +46,8 @@ function parseHash(hash: string): {
   } else if (head === 'files') {
     const fileId = segments[1] ? decodeURIComponent(segments.slice(1).join('/')) : null;
     return { tab: 'files', fileId, destination };
+  } else if (head === 'senml') {
+    return { tab: 'senml', fileId: null, destination };
   } else if (head === 'bundles') {
     return { tab: 'bundles', fileId: null, destination };
   } else if (head === 'send') {
@@ -49,7 +60,7 @@ function parseHash(hash: string): {
 
 export function App() {
   const initialNav = parseHash(window.location.hash);
-  const [activeTab, setActiveTab] = useState<'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs'>(initialNav.tab);
+  const [activeTab, setActiveTab] = useState<'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs'>(initialNav.tab);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(initialNav.fileId);
   const [sendDestination, setSendDestination] = useState<string | null>(initialNav.destination);
 
@@ -64,6 +75,8 @@ export function App() {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
     return localStorage.getItem('dtn_sound_notifications') !== 'false';
   });
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
 
   const [config, setConfig] = useState<StationConfig | null>(null);
   const [services, setServices] = useState<ActiveService[]>([]);
@@ -81,6 +94,32 @@ export function App() {
   const [canInstall, setCanInstall] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+
+  // Web Notification states
+  const [notifPermission, setNotifPermission] = useState<NotificationPermissionState>(() =>
+    getNotificationPermission()
+  );
+  const [notifEnabled, setNotifEnabled] = useState<boolean>(() => isNotificationEnabled());
+  const notifEnabledRef = useRef(notifEnabled);
+  notifEnabledRef.current = notifEnabled;
+
+  const handleToggleNotification = async () => {
+    if (notifPermission === 'default') {
+      const perm = await requestNotificationPermission();
+      setNotifPermission(perm);
+      if (perm === 'granted') {
+        setNotifEnabled(true);
+        persistNotificationEnabled(true);
+        sendWebNotification('Hardy Ham DTN', {
+          body: 'Notifications activées pour les alertes et messages de chat.',
+        });
+      }
+    } else if (notifPermission === 'granted') {
+      const next = !notifEnabled;
+      setNotifEnabled(next);
+      persistNotificationEnabled(next);
+    }
+  };
 
   useEffect(() => {
     const unsubInstall = subscribePwaInstall(setCanInstall);
@@ -116,7 +155,7 @@ export function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const navigateToTab = (tab: 'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs') => {
+  const navigateToTab = (tab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs') => {
     setActiveTab(tab);
     if (tab === 'files') {
       window.location.hash = '#/files';
@@ -254,8 +293,18 @@ export function App() {
           const msg: ChatMessage = JSON.parse(e.data);
           setLastChatMessage(msg);
           fetchUnreadChat();
-          if (soundEnabled) {
+          if (soundEnabledRef.current) {
             playChime();
+          }
+          if (document.visibilityState === 'hidden' && notifEnabledRef.current) {
+            sendWebNotification(
+              `[DTN Chat] ${msg.source}`,
+              {
+                body: msg.text || 'Nouveau message reçu',
+                tag: `dtn-chat-${msg.source}`,
+              },
+              () => navigateToTab('chat')
+            );
           }
         } catch (err) {
           console.error('Failed to parse chat_message event', err);
@@ -265,7 +314,7 @@ export function App() {
       es.addEventListener('file_received', () => {
         setBundlesKey((k) => k + 1);
         fetchUnreadFiles();
-        if (soundEnabled) {
+        if (soundEnabledRef.current) {
           playChime();
         }
       });
@@ -296,7 +345,7 @@ export function App() {
         es.close();
       }
     };
-  }, [activeTab, soundEnabled]);
+  }, [activeTab]);
 
   // Collect known peer candidates from config safely
   const peerSuggestions: string[] = Array.from(
@@ -372,6 +421,9 @@ export function App() {
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
+        notificationPermission={notifPermission}
+        notificationEnabled={notifEnabled}
+        onToggleNotification={handleToggleNotification}
         sseStatus={sseStatus}
         stationCallsign={config?.callsign || undefined}
         nodeId={config?.node_id}
@@ -408,6 +460,8 @@ export function App() {
             onReply={handleReplyFile}
             onUnreadChange={setUnreadFilesTotal}
           />
+        ) : activeTab === 'senml' ? (
+          <SenmlView />
         ) : activeTab === 'bundles' ? (
           <BundlesView
             key={bundlesKey}

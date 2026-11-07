@@ -98,12 +98,14 @@ export function FilesView({
       if (!res.ok) {
         throw new Error(`Failed to load file bundles: HTTP ${res.status}`);
       }
-      const data: FileBundleRecord[] = await res.json();
-      setBundles(data);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setBundles(data);
 
-      const unread = data.filter((b) => !b.is_read).length;
-      if (onUnreadChange) {
-        onUnreadChange(unread);
+        const unread = data.filter((b) => !b.is_read).length;
+        if (onUnreadChange) {
+          onUnreadChange(unread);
+        }
       }
     } catch (e: any) {
       setError(e.message || 'Error loading files');

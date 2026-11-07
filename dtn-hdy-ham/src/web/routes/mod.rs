@@ -6,6 +6,7 @@ pub mod clas;
 pub mod config;
 pub mod files;
 pub mod security;
+pub mod senml;
 pub mod services;
 pub mod static_routes;
 

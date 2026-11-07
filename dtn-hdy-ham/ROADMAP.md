@@ -300,22 +300,37 @@ flowchart TD
 
 ---
 
-### Phase 5: Telemetry & SenML IoT Dashboard (`SENML_LAST` & `SENML_GRAPH`)
-> **Goal**: Decode and display IoT sensor data formatted in RFC 8428 SenML (CBOR and JSON), matching `dtn-android-messenger`'s `SenmlLastScreen`.
+### Phase 5: Telemetry & SenML IoT Gateway & Dashboard (`SENML_LAST`) (Completed)
+> **Goal**: Decode, normalize, persist and stream IoT telemetry formatted in RFC 8428 SenML (CBOR and JSON), matching `dtn-android-messenger`'s `SENML_LAST` view and offering an Open MCT compatible time-series API (ADR 0021).
 
 #### Deliverables:
-1. **SenML Parser Engine (Rust)**:
-   * Support SenML records over DTN: Base Name (`bn`), Name (`n`), Value (`v`), String (`vs`), Boolean (`vb`), Unit (`u`), Time (`t`).
-   * Handle both CBOR (`application/senml+cbor`) and JSON (`application/senml+json`).
-   * Store/cache latest values per sensor (`service_eid`, `full_name`).
-2. **Backend Telemetry Endpoints (`/api/v1/senml`)**:
-   * `GET /api/v1/senml/latest`: Current snapshot of all received sensor channels.
-   * `GET /api/v1/senml/history?sensor={name}&limit=100`: Time-series points for historical plotting.
-   * `PUT /api/v1/senml/labels`: Save operator-defined custom labels (e.g., alias `urn:dev:mac:0024e4:temp` as *"Solar Battery Temp"*).
-3. **Frontend Telemetry Dashboard**:
-   * Sensor card grid: Metric name, current value, engineering unit (°C, V, A, %, hPa), elapsed time.
-   * Sparkline / interactive historical chart (using lightweight charting like uPlot or Chart.js).
-   * Sensor customization modal for aliases and unit conversions.
+1. [x] **SenML Parser Engine & Normalization (Rust, RFC 8428)** (`senml/parser.rs`):
+   * Full RFC 8428 SenML parser with auto-detection of JSON (`application/senml+json`) and CBOR (`application/senml+cbor`).
+   * Support for base fields (`bn`, `bt`, `bu`, `bv`) and measurements (`n`, `u`, `v`, `vs`, `vb`, `t`).
+   * Normalization of absolute POSIX timestamps in milliseconds and relative RFC 8428 timestamps anchored to DTN bundle `creation_timestamp`.
+2. [x] **SQLite Time-Series Storage & In-Memory Cache** (`senml/storage.rs`):
+   * Dedicated SQLite database `senml.db` configured with `WAL`, `synchronous = NORMAL`, and foreign keys.
+   * Tables: `metric_dictionary` (metric metadata, aliases, display order, visibility) and `telemetry_history` (`WITHOUT ROWID`, indexed on `(metric_id, timestamp ASC)`).
+   * In-memory cache `metric_name -> metric_id` to eliminate redundant SELECT queries during high-throughput ingestion.
+   * Batch insertion with `ON CONFLICT REPLACE` guaranteeing complete idempotence against duplicate/out-of-order DTN bundles.
+   * Synchronization with YAML station config (`senml.metrics`).
+3. [x] **Internal BPA Service (`dtn://<node>/senml`) & BPSec Security** (`senml/service.rs`):
+   * Permanent built-in service bound to `dtn://<node>/senml`.
+   * Cryptographic verification using BPSec BIB Keystore matching policy (drops invalid signatures under `strict`).
+4. [x] **Unified REST & Open MCT Telemetry API** (`web/routes/senml.rs`):
+   * `GET /api/v1/senml/metrics`: Lists discovered metrics with aliases and units.
+   * `GET /api/v1/senml/metrics/latest`: Snapshot of the latest point per metric (with optional `?id=...`, `?ids=...`, and `?dashboard_only=true` filtering).
+   * `GET /api/v1/senml/history`: Open MCT Telemetry Request compliant interval query (`?id=...&start=...&end=...`) returning `[{ "utc": ..., "value": ... }]`.
+   * `GET /api/v1/senml/stream`: Server-Sent Events stream emitting live `event: telemetry` points as they are ingested.
+   * `GET|POST|PUT|DELETE /api/v1/senml/dashboard/cards`: Dashboard card management (add, inline alias rename, reorder, remove, clear).
+5. [x] **Frontend Telemetry Dashboard (`SenmlView.tsx`)**:
+   * Card grid adhering to `dtn-android-messenger`'s `SENML_LAST` ergonomics.
+   * Responsive cards with current value, engineering unit, relative & UTC timestamps, and live update flash animation.
+   * Inline editable alias, up/down card reordering, and removal.
+   * Modal dialog to add cards from auto-discovered metrics or manual input.
+   * Live streaming updates via EventSource `/api/v1/senml/stream`.
+6. [x] **Comprehensive End-to-End Verification (`examples/test_e2e_hardy_duo.py`)**:
+   * 76/76 automated end-to-end integration tests passing across two interconnected Hardy nodes (`STATA` <--> `STATB` via TCPCLv4), covering BPSec, Chat, Files, and SenML telemetry (JSON & CBOR).
 
 ---
 
@@ -423,15 +438,17 @@ flowchart TD
 > **Goal**: Turn the web dashboard into an installable mobile terminal for field tablets and smartphones.
 
 #### Deliverables:
-1. **PWA Manifest & Service Worker**:
-   * Web App Manifest (`manifest.json`) with standalone display mode, app icons, and theme color.
-   * Service worker caching frontend static assets for instant offline loading.
-2. **Field Ergonomics & Audio Notes**:
+1. **PWA Manifest, Service Worker & Offline Caching**:
+   * [x] Web App Manifest (`manifest.webmanifest`) with standalone display mode, app icons, and theme color.
+   * [x] Service worker caching frontend static assets (App Shell) for instant offline loading.
+   * [x] Hybrid Cache/Network-First strategy with offline consultation for cached conversations (`/api/v1/chat/*`) and files (`/api/v1/files/*`).
+2. **Field Ergonomics, Touch Controls & Notifications**:
    * [x] In-browser microphone voice recorder in the Generic Bundle Dispatcher (`SendBundleView.tsx`).
    * [x] Multi-source HTML5 audio preview before dispatching.
    * [x] Automatic lossless remuxing of WebM/Opus to pure RFC 7845 Ogg/Opus on backend injection.
    * [x] High-contrast dark and light mode themes toggleable in navbar.
-   * Mobile touch-friendly gesture controls and bottom navigation bar on small screens.
+   * [x] Mobile bottom navigation bar on smartphone viewports with $\ge 48\text{px}$ touch targets for gloved operations.
+   * [x] Web Notification API integration for background operator alerts on incoming chat messages when screen is off/unfocused.
 
 ---
 

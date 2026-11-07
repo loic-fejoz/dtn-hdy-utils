@@ -11,6 +11,7 @@ pub mod internal_storage;
 pub mod log_buffer;
 pub mod routing;
 pub mod security;
+pub mod senml;
 pub mod server;
 pub mod service_tracker;
 pub mod web;

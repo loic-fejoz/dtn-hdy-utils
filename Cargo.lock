@@ -1015,6 +1015,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bytes",
+ "ciborium",
  "clap",
  "config",
  "directories 5.0.1",

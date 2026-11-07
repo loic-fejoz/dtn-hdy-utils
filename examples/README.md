@@ -201,6 +201,28 @@ This demonstrates two `dtn-hdy-ham` instances interconnected via TCPCLv4:
 - `STATA` (`examples/stata.yaml`): Node EID `dtn://stata.ampr.org/`, gRPC port `3050`, TCPCL port `4551`, connecting to STATB on `127.0.0.1:4552`.
 - `STATB` (`examples/statb.yaml`): Node EID `dtn://statb.ampr.org/`, gRPC port `3051`, TCPCL listening on `127.0.0.1:4552`.
 
+### Automated End-to-End Test Suite:
+
+An automated test harness (`run_e2e_hardy_duo.sh` and `test_e2e_hardy_duo.py`) spins up two isolated in-memory instances of `dtn-hdy-ham` and runs 76 end-to-end integration test assertions covering all newly implemented features:
+- **Dynamic Static Routing**: Hot-reload route injection (`POST /api/v1/routes`) and dynamic withdrawal into Hardy's RIB.
+- **TCPCLv4 Inter-station Peering**: Real-time status reporting and automatic connection handling.
+- **BPSec BIB Keystore (RFC 9103/9172)**: Directional separation, 16-byte secret strength, domain-separated fingerprinting, in-place updates.
+- **End-to-End Authenticated Chat**: Outbound HMAC-SHA256 signing, store-and-forward TCPCLv4 delivery, inbound verification, conversation threading and unread management.
+- **Strict BPSec Policy Verification**: Rejection and drop of corrupted/mismatched signatures under `strict` policy vs. `invalid` badging under `warn`.
+- **Bidirectional Exchanges**: Response confirmation with reciprocal cryptographic authentication.
+- **Files Service & HTTP Range**: File transfer to `dtn://statb/files`, MIME markdown detection, RFC 9110 HTTP Range partial streaming (`206 Partial Content`), sticky retention toggle, and OWASP XSS headers.
+- **SenML IoT Telemetry Gateway (RFC 8428 & SQLite)**: Auto-detection and decoding of JSON and CBOR payloads, POSIX/relative timestamp normalization, idempotent SQLite storage (`telemetry_history`), Open MCT history API (`/api/v1/senml/history`), real-time SSE push (`/api/v1/senml/stream`), and dashboard cards CRUD.
+- **Real-Time Push (SSE)**: Event streaming over `/api/v1/events` (`chat_message`, `file_received`, `services_update`).
+- **Bundle Inspector & Log Ring Buffer**: Storage detail view and in-memory log buffer (`/api/v1/logs`).
+
+```bash
+# Exécution complète de la suite E2E automatisée :
+./examples/run_e2e_hardy_duo.sh
+
+# Pour conserver les 2 instances actives en tâche de fond pour inspection interactive web/REST :
+./examples/run_e2e_hardy_duo.sh --keep-alive
+```
+
 ### Running the demonstration:
 
 1. Start STATB in one terminal:

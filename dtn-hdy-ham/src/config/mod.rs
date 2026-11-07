@@ -49,6 +49,10 @@ pub struct HamConfig {
     /// Static routing definitions.
     pub routes: Vec<RouteConfig>,
 
+    /// SenML telemetry and dashboard configuration.
+    #[serde(default)]
+    pub senml: Option<SenmlConfig>,
+
     /// RFC 9171 ingress validation policy toggles.
     #[serde(default)]
     pub rfc9171_validity: Option<Rfc9171ValidityConfig>,
@@ -70,6 +74,7 @@ impl Default for HamConfig {
             web: None,
             clas: Vec::new(),
             routes: Vec::new(),
+            senml: None,
             rfc9171_validity: Some(Rfc9171ValidityConfig::default()),
             config_path: None,
         }
@@ -338,6 +343,27 @@ pub struct RouteConfig {
 
     /// Optional next hop address (e.g. `44.27.131.233:4556` or callsign).
     pub next_hop: Option<String>,
+}
+
+/// SenML telemetry configuration block.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct SenmlConfig {
+    /// List of ordered dashboard metrics.
+    #[serde(default)]
+    pub metrics: Vec<DashboardMetricConfig>,
+}
+
+/// A configured telemetry metric card for the SenML dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct DashboardMetricConfig {
+    /// Full SenML metric name (e.g. `urn:dtn:node1:power/bus_voltage`).
+    pub name: String,
+
+    /// Optional human-readable display alias/label (e.g. `Tension Bus`).
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 impl HamConfig {
