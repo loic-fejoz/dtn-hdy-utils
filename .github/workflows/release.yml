@@ -1,0 +1,294 @@
+name: Release & Multi-Platform Packaging
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-web:
+    name: Build Web Frontend Assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout dtn-hdy-utils
+        uses: actions/checkout@v4
+        with:
+          path: dtn-hdy-utils
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: dtn-hdy-utils/dtn-hdy-ham/web/pnpm-lock.yaml
+
+      - name: Build Web Frontend
+        run: |
+          cd dtn-hdy-utils/dtn-hdy-ham/web
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Upload Web Dist Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ham-web-dist
+          path: dtn-hdy-utils/dtn-hdy-ham/web/dist/
+          retention-days: 7
+
+  package:
+    name: Package (${{ matrix.platform }})
+    needs: build-web
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            target: x86_64-unknown-linux-musl
+            format: tar
+            bin_ext: ""
+          - os: ubuntu-latest
+            platform: linux-aarch64
+            target: aarch64-unknown-linux-musl
+            format: tar
+            bin_ext: ""
+          - os: windows-latest
+            platform: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            format: zip
+            bin_ext: ".exe"
+          - os: macos-latest
+            platform: macos-universal
+            target: universal
+            format: tar
+            bin_ext: ""
+
+    steps:
+      - name: Checkout dtn-hdy-utils
+        uses: actions/checkout@v4
+        with:
+          path: dtn-hdy-utils
+
+      - name: Checkout hardy dependency
+        uses: actions/checkout@v4
+        with:
+          repository: ricktaylor/hardy
+          path: hardy
+          ref: "260fe751a0d8058d3a438d3b588bc05502bd1727"
+
+      - name: Checkout hqfbp-rs dependency
+        uses: actions/checkout@v4
+        with:
+          repository: loic-fejoz/hqfbp-rs
+          path: hqfbp-rs
+          ref: "960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec"
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Linux x86_64 Musl Tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
+
+      - name: Install Linux aarch64 Musl Cross Toolchain
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          curl -sSL https://musl.cc/aarch64-linux-musl-cross.tgz | sudo tar -xzC /opt
+          echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+
+      - name: Setup Rust Toolchain (Target Specific)
+        if: matrix.target != 'universal'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Rust Toolchain (macOS Universal)
+        if: matrix.target == 'universal'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Download Web Dist Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ham-web-dist
+          path: dtn-hdy-utils/dtn-hdy-ham/web/dist
+
+      - name: Build Binaries (Linux x86_64 musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-ham
+          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
+          mkdir -p bin
+          cp target/${{ matrix.target }}/release/dtn-hdy-ham bin/
+          for b in dtnsend dtnprint dtnfiles dtntrigger dtnquery dtnping dtnforward dtnbib dtnbasket dtnbasket-cli hdy-stats; do
+            cp target/${{ matrix.target }}/release/$b bin/
+          done
+        working-directory: dtn-hdy-utils
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+
+      - name: Build Binaries (Linux aarch64 musl)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-ham
+          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
+          mkdir -p bin
+          cp target/${{ matrix.target }}/release/dtn-hdy-ham bin/
+          for b in dtnsend dtnprint dtnfiles dtntrigger dtnquery dtnping dtnforward dtnbib dtnbasket dtnbasket-cli hdy-stats; do
+            cp target/${{ matrix.target }}/release/$b bin/
+          done
+        working-directory: dtn-hdy-utils
+        env:
+          CC_aarch64_unknown_linux_musl: aarch64-linux-musl-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-musl-gcc
+          RUSTFLAGS: "-C target-feature=+crt-static"
+
+      - name: Build Binaries (Windows MSVC)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-ham
+          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
+          mkdir -p bin
+          cp target/${{ matrix.target }}/release/dtn-hdy-ham.exe bin/
+          for b in dtnsend dtnprint dtnfiles dtntrigger dtnquery dtnping dtnforward dtnbib dtnbasket dtnbasket-cli hdy-stats; do
+            cp target/${{ matrix.target }}/release/${b}.exe bin/
+          done
+        working-directory: dtn-hdy-utils
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+
+      - name: Build Universal Binaries (macOS)
+        if: matrix.target == 'universal'
+        run: |
+          cargo build --release --target aarch64-apple-darwin -p dtn-hdy-ham
+          cargo build --release --target x86_64-apple-darwin -p dtn-hdy-ham
+          cargo build --release --target aarch64-apple-darwin -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
+          cargo build --release --target x86_64-apple-darwin -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
+          mkdir -p bin
+          all_bins="dtn-hdy-ham dtnsend dtnprint dtnfiles dtntrigger dtnquery dtnping dtnforward dtnbib dtnbasket dtnbasket-cli hdy-stats"
+          for b in $all_bins; do
+            lipo -create -output bin/$b \
+              target/aarch64-apple-darwin/release/$b \
+              target/x86_64-apple-darwin/release/$b
+          done
+        working-directory: dtn-hdy-utils
+
+      - name: Assemble and Archive Distribution Packages
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="dev-${GITHUB_SHA::7}"
+          fi
+          echo "Packaging version: ${VERSION}"
+
+          BIN_EXT="${{ matrix.bin_ext }}"
+          PLATFORM="${{ matrix.platform }}"
+
+          # 1. Assemble dtn-hdy-ham Package
+          HAM_ROOT="dtn-hdy-ham-${VERSION}-${PLATFORM}"
+          mkdir -p "${HAM_ROOT}/bin"
+          
+          ham_bins=("dtn-hdy-ham" "dtnsend" "dtnprint" "dtnfiles" "dtntrigger")
+          for b in "${ham_bins[@]}"; do
+            cp "dtn-hdy-utils/bin/${b}${BIN_EXT}" "${HAM_ROOT}/bin/"
+          done
+          
+          cp "dtn-hdy-utils/dtn-hdy-ham/config.example.toml" "${HAM_ROOT}/"
+          cp "dtn-hdy-utils/dtn-hdy-ham/QUICKSTART.md" "${HAM_ROOT}/"
+          if [[ "${PLATFORM}" == linux* ]]; then
+            cp "dtn-hdy-utils/dtn-hdy-ham/dtn-hdy-ham.service" "${HAM_ROOT}/"
+          fi
+          cp "dtn-hdy-utils/README.md" "${HAM_ROOT}/"
+          cp "dtn-hdy-utils/LICENSE.md" "${HAM_ROOT}/"
+
+          # 2. Assemble dtn-hdy-utils Package
+          UTILS_ROOT="dtn-hdy-utils-${VERSION}-${PLATFORM}"
+          mkdir -p "${UTILS_ROOT}/bin"
+          
+          utils_bins=("dtnsend" "dtnprint" "dtnquery" "dtntrigger" "dtnping" "dtnfiles" "dtnforward" "dtnbib" "dtnbasket" "dtnbasket-cli" "hdy-stats")
+          for b in "${utils_bins[@]}"; do
+            cp "dtn-hdy-utils/bin/${b}${BIN_EXT}" "${UTILS_ROOT}/bin/"
+          done
+          
+          mkdir -p "${UTILS_ROOT}/examples"
+          cp -r dtn-hdy-utils/examples/* "${UTILS_ROOT}/examples/"
+          rm -f "${UTILS_ROOT}/examples/dtnsend" 2>/dev/null || true
+          rm -rf "${UTILS_ROOT}/examples/__pycache__" "${UTILS_ROOT}/examples/matrix_store" 2>/dev/null || true
+          
+          cp "dtn-hdy-utils/README.md" "${UTILS_ROOT}/"
+          cp "dtn-hdy-utils/LICENSE.md" "${UTILS_ROOT}/"
+
+          # 3. Create Compressed Archives and Checksums
+          mkdir -p dist_archives
+          if [[ "${{ matrix.format }}" == "tar" ]]; then
+            HAM_ARCHIVE="${HAM_ROOT}.tar.gz"
+            UTILS_ARCHIVE="${UTILS_ROOT}.tar.gz"
+            tar -czf "dist_archives/${HAM_ARCHIVE}" "${HAM_ROOT}"
+            tar -czf "dist_archives/${UTILS_ARCHIVE}" "${UTILS_ROOT}"
+          else
+            HAM_ARCHIVE="${HAM_ROOT}.zip"
+            UTILS_ARCHIVE="${UTILS_ROOT}.zip"
+            7z a -tzip "dist_archives/${HAM_ARCHIVE}" "${HAM_ROOT}"
+            7z a -tzip "dist_archives/${UTILS_ARCHIVE}" "${UTILS_ROOT}"
+          fi
+
+          cd dist_archives
+          for arch in "${HAM_ARCHIVE}" "${UTILS_ARCHIVE}"; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${arch}" > "${arch}.sha256"
+            else
+              shasum -a 256 "${arch}" > "${arch}.sha256"
+            fi
+          done
+          ls -la
+
+      - name: Upload Package Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.platform }}
+          path: dist_archives/*
+          retention-days: 14
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish Official GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all_archives
+          merge-multiple: true
+
+      - name: Inspect release assets
+        run: ls -la all_archives/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: all_archives/*
+          generate_release_notes: true

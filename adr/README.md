@@ -20,4 +20,4 @@ This directory contains records of the major architectural and design decisions 
 14. [ADR 14: Dynamic Static Routing, Out-of-the-Box Gateway Peering & TCPCL Contact Coordinator](0014-dynamic-static-routing-and-tcpcl-peering-coordinator.md)
 15. [ADR 15: KISS Transport Leaky-Bucket Rate Limiter & Half-Duplex Checkpoint Pacing](0015-kiss-leaky-bucket-and-half-duplex-pacing.md)
 16. [ADR 16: Application Storage Quota, LRU Eviction Cascade & Visual Lifetime Expiration](0016-application-storage-quota-and-visual-expiration.md)
-
+17. [ADR 17: Unified Static Release Packaging and Out-of-the-Box Distribution](0017-unified-static-release-packaging.md)

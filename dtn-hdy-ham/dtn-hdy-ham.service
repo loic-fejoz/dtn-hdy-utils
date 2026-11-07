@@ -1,0 +1,24 @@
+[Unit]
+Description=Hamradio DTN BPv7 Bundle Processing Node
+Documentation=https://github.com/loic-fejoz/dtn-hdy-utils
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/lib/dtn-hdy-ham
+ExecStart=/usr/local/bin/dtn-hdy-ham -c /etc/dtn-hdy-ham/config.toml
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening options
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
