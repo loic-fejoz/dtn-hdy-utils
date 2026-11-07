@@ -72,7 +72,9 @@ impl HamServer {
             ));
             let bundle_store = Arc::new(LocalDiskStorage::new(Some(bundle_dir), Some(false), true));
             ephemeral_dir = Some(temp);
-            let chat_mgr = crate::internal_storage::InternalStorage::new_in_memory()?;
+            let chat_mgr = crate::internal_storage::InternalStorage::new_in_memory_with_quota(
+                config.application.quota.max_storage,
+            )?;
             (meta_store, bundle_store, chat_mgr)
         } else {
             let data_dir = config.storage.effective_data_dir();
@@ -96,7 +98,10 @@ impl HamServer {
 
             let meta_store = Arc::new(SqliteStorage::new(db_dir, db_name, true));
             let bundle_store = Arc::new(LocalDiskStorage::new(Some(bundle_dir), Some(false), true));
-            let chat_mgr = crate::internal_storage::InternalStorage::new_disk(&data_dir)?;
+            let chat_mgr = crate::internal_storage::InternalStorage::new_disk_with_quota(
+                &data_dir,
+                config.application.quota.max_storage,
+            )?;
             (meta_store, bundle_store, chat_mgr)
         };
 
@@ -517,12 +522,9 @@ impl HamServer {
             }
         }
 
-        // Spawn cyclic expiration reaper for non-sticky internal bundles and messages
-        let reaper_cancel = self.tasks.cancel_token().clone();
-        crate::internal_storage::spawn_expiration_reaper(
-            self.chat_manager.clone(),
-            self.service_tracker.clone(),
-            reaper_cancel,
+        info!(
+            "Application storage quota active: max {} bytes (visual lifetime expiration enabled)",
+            self.chat_manager.max_storage_bytes()
         );
 
         let coordinators = std::mem::take(&mut self.coordinators);

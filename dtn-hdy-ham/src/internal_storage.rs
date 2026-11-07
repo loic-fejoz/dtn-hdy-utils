@@ -4,6 +4,7 @@
 //! stored in `<data_dir>/internal_services/`.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -206,12 +207,22 @@ pub fn extract_callsign(peer_eid: &str) -> Option<String> {
 pub struct InternalStorage {
     conn: Arc<Mutex<Connection>>,
     files_dir: PathBuf,
+    db_path: Option<PathBuf>,
+    max_storage_bytes: Arc<AtomicU64>,
     _ephemeral_dir: Option<Arc<tempfile::TempDir>>,
 }
 
 impl InternalStorage {
-    /// Constructs a persistent storage in `<base_dir>/internal_services/`.
+    /// Constructs a persistent storage in `<base_dir>/internal_services/` with default 300MB quota.
     pub fn new_disk(base_dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+        Self::new_disk_with_quota(base_dir, crate::config::DEFAULT_APP_MAX_STORAGE_BYTES)
+    }
+
+    /// Constructs a persistent storage in `<base_dir>/internal_services/` with explicit quota.
+    pub fn new_disk_with_quota(
+        base_dir: impl AsRef<Path>,
+        max_storage_bytes: u64,
+    ) -> anyhow::Result<Self> {
         let internal_dir = base_dir.as_ref().join("internal_services");
         let files_dir = internal_dir.join("files");
 
@@ -225,12 +236,19 @@ impl InternalStorage {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             files_dir,
+            db_path: Some(db_path),
+            max_storage_bytes: Arc::new(AtomicU64::new(max_storage_bytes)),
             _ephemeral_dir: None,
         })
     }
 
-    /// Constructs an in-memory storage with temporary files directory.
+    /// Constructs an in-memory storage with temporary files directory and default 300MB quota.
     pub fn new_in_memory() -> anyhow::Result<Self> {
+        Self::new_in_memory_with_quota(crate::config::DEFAULT_APP_MAX_STORAGE_BYTES)
+    }
+
+    /// Constructs an in-memory storage with temporary files directory and explicit quota.
+    pub fn new_in_memory_with_quota(max_storage_bytes: u64) -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
         Self::init_tables(&conn)?;
 
@@ -243,6 +261,8 @@ impl InternalStorage {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             files_dir,
+            db_path: None,
+            max_storage_bytes: Arc::new(AtomicU64::new(max_storage_bytes)),
             _ephemeral_dir: Some(Arc::new(temp_dir)),
         })
     }
@@ -251,6 +271,178 @@ impl InternalStorage {
     #[must_use]
     pub fn files_dir(&self) -> &Path {
         &self.files_dir
+    }
+
+    /// Returns the maximum allowed storage quota in bytes.
+    #[must_use]
+    pub fn max_storage_bytes(&self) -> u64 {
+        self.max_storage_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Updates the maximum allowed storage quota in bytes.
+    pub fn set_max_storage_bytes(&self, bytes: u64) {
+        self.max_storage_bytes.store(bytes, Ordering::Relaxed);
+    }
+
+    /// Calculates total storage usage across file payloads in `files_dir` and the SQLite database.
+    pub fn current_storage_usage(&self) -> u64 {
+        match self.conn.lock() {
+            Ok(conn) => self.calculate_storage_usage_with_conn(&conn),
+            Err(_) => self.calculate_files_usage(),
+        }
+    }
+
+    fn calculate_files_usage(&self) -> u64 {
+        let mut total: u64 = 0;
+        if let Ok(entries) = std::fs::read_dir(&self.files_dir) {
+            for entry in entries.flatten() {
+                if let Some(meta) = entry.metadata().ok().filter(|m| m.is_file()) {
+                    total = total.saturating_add(meta.len());
+                }
+            }
+        }
+        total
+    }
+
+    fn calculate_storage_usage_with_conn(&self, conn: &Connection) -> u64 {
+        let mut total = self.calculate_files_usage();
+
+        if let Some(ref db_path) = self.db_path {
+            if let Ok(meta) = std::fs::metadata(db_path) {
+                total = total.saturating_add(meta.len());
+            }
+            let wal = db_path.with_extension("db-wal");
+            if let Ok(meta) = std::fs::metadata(&wal) {
+                total = total.saturating_add(meta.len());
+            }
+            let shm = db_path.with_extension("db-shm");
+            if let Ok(meta) = std::fs::metadata(&shm) {
+                total = total.saturating_add(meta.len());
+            }
+        } else {
+            let page_count: i64 = conn
+                .query_row("PRAGMA page_count", [], |r| r.get(0))
+                .unwrap_or(0);
+            let page_size: i64 = conn
+                .query_row("PRAGMA page_size", [], |r| r.get(0))
+                .unwrap_or(4096);
+            total = total.saturating_add((page_count.max(0) as u64) * (page_size.max(0) as u64));
+        }
+
+        total
+    }
+
+    /// Synchronously ensures storage capacity for `incoming_bytes` under `max_storage_bytes`.
+    /// Evicts non-sticky items according to the strict 4-tier LRU cascade:
+    ///   Tier 1: Expired chats (non-sticky, oldest first)
+    ///   Tier 2: Expired files (non-sticky, oldest first)
+    ///   Tier 3: Active chats (non-sticky, oldest first)
+    ///   Tier 4: Active files (non-sticky, oldest first)
+    ///
+    /// Items marked `is_sticky = 1` are never evicted.
+    /// If capacity cannot be freed, returns an error rejecting the incoming item.
+    pub fn ensure_capacity(&self, incoming_bytes: u64) -> anyhow::Result<()> {
+        let max_storage = self.max_storage_bytes();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Mutex poisoned"))?;
+
+        let mut current = self.calculate_storage_usage_with_conn(&conn);
+        if current.saturating_add(incoming_bytes) <= max_storage {
+            return Ok(());
+        }
+
+        let now_ms = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+        let mut evicted_chats: usize = 0;
+        let mut evicted_files: usize = 0;
+
+        let tier_queries = [
+            // Tier 1: Expired chats
+            (
+                true,
+                "SELECT id, content, '' as payload_path, 0 as size FROM chat_messages WHERE is_sticky = 0 AND expiry_timestamp > 0 AND expiry_timestamp <= ?1 ORDER BY timestamp ASC",
+            ),
+            // Tier 2: Expired files
+            (
+                false,
+                "SELECT id, '', payload_path, size FROM files_bundles WHERE is_sticky = 0 AND expiry_timestamp > 0 AND expiry_timestamp <= ?1 ORDER BY creation_timestamp ASC",
+            ),
+            // Tier 3: Valid/active chats
+            (
+                true,
+                "SELECT id, content, '' as payload_path, 0 as size FROM chat_messages WHERE is_sticky = 0 AND (expiry_timestamp = 0 OR expiry_timestamp > ?1) ORDER BY timestamp ASC",
+            ),
+            // Tier 4: Valid/active files
+            (
+                false,
+                "SELECT id, '', payload_path, size FROM files_bundles WHERE is_sticky = 0 AND (expiry_timestamp = 0 OR expiry_timestamp > ?1) ORDER BY creation_timestamp ASC",
+            ),
+        ];
+
+        for (is_chat, query_sql) in tier_queries {
+            if current.saturating_add(incoming_bytes) <= max_storage {
+                break;
+            }
+
+            let mut stmt = conn.prepare(query_sql)?;
+            let rows: Vec<(String, String, String, u64)> = stmt
+                .query_map(params![now_ms], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? as u64))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            for (id, content, payload_path, file_size) in rows {
+                let freed_bytes: u64 = if is_chat {
+                    conn.execute("DELETE FROM chat_messages WHERE id = ?1", params![id])?;
+                    evicted_chats += 1;
+                    (content.len() + 256) as u64
+                } else {
+                    let p = Path::new(&payload_path);
+                    let actual_size = if p.exists() {
+                        let len = p.metadata().map(|m| m.len()).unwrap_or(file_size);
+                        let _ = std::fs::remove_file(p);
+                        len
+                    } else {
+                        file_size
+                    };
+                    conn.execute("DELETE FROM files_bundles WHERE id = ?1", params![id])?;
+                    evicted_files += 1;
+                    actual_size
+                };
+
+                current = current.saturating_sub(freed_bytes);
+                if current.saturating_add(incoming_bytes) <= max_storage {
+                    break;
+                }
+            }
+        }
+
+        // Clean up empty conversation entries if any chats were evicted
+        if evicted_chats > 0 {
+            let _ = conn.execute(
+                "DELETE FROM chat_conversations WHERE peer NOT IN (SELECT DISTINCT conversation_peer FROM chat_messages)",
+                [],
+            );
+        }
+
+        if evicted_chats > 0 || evicted_files > 0 {
+            info!(
+                "Storage quota eviction: freed space, removed {} chats, {} files (now using {}/{} bytes)",
+                evicted_chats, evicted_files, current, max_storage
+            );
+        }
+
+        if current.saturating_add(incoming_bytes) > max_storage {
+            warn!(
+                "Storage quota exceeded: current {} bytes + incoming {} bytes > max {} bytes. Sticky data protected. Rejecting incoming bundle.",
+                current, incoming_bytes, max_storage
+            );
+            anyhow::bail!("Storage quota exceeded: cannot store bundle without exceeding limit");
+        }
+
+        Ok(())
     }
 
     fn init_tables(conn: &Connection) -> anyhow::Result<()> {
@@ -339,6 +531,9 @@ impl InternalStorage {
 
     /// Inserts or replaces a chat message.
     pub fn insert_chat_message(&self, msg: &ChatMessage) -> anyhow::Result<()> {
+        let estimated_size = (msg.content.len() + 256) as u64;
+        self.ensure_capacity(estimated_size)?;
+
         let conn = self
             .conn
             .lock()
@@ -617,6 +812,15 @@ impl InternalStorage {
 
     /// Inserts or replaces a file bundle record.
     pub fn insert_file_bundle(&self, bundle: &FileBundleRecord) -> anyhow::Result<()> {
+        let needed_extra = if Path::new(&bundle.payload_path).exists() {
+            0
+        } else {
+            bundle.size
+        };
+        if needed_extra > 0 {
+            self.ensure_capacity(needed_extra)?;
+        }
+
         let conn = self
             .conn
             .lock()
@@ -1276,6 +1480,211 @@ mod tests {
             week_found.expiry_timestamp,
             now_ms + (week_secs * 1000),
             "1-week message expiry must remain unchanged across server restarts"
+        );
+    }
+
+    #[test]
+    fn test_storage_quota_and_eviction_cascade() {
+        let storage = InternalStorage::new_in_memory().unwrap();
+        let now_ms = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+
+        // 1. Setup items across all 4 tiers + sticky
+        // Sticky items
+        let c_stk = ChatMessage {
+            id: "c_stk".to_string(),
+            conversation_peer: "dtn://peer/chat".to_string(),
+            sender_eid: "dtn://stata/chat".to_string(),
+            recipient_eid: "dtn://peer/chat".to_string(),
+            content: "Sticky chat message".to_string(),
+            direction: "outbound".to_string(),
+            status: "sent".to_string(),
+            is_read: true,
+            is_sticky: true,
+            timestamp: now_ms,
+            expiry_timestamp: now_ms + 10000,
+            created_at: "2026-11-05T00:00:00Z".to_string(),
+        };
+        storage.insert_chat_message(&c_stk).unwrap();
+
+        let f_stk_path = storage.files_dir().join("stk.bin");
+        std::fs::write(&f_stk_path, vec![0xAA; 1000]).unwrap();
+        let f_stk = FileBundleRecord {
+            id: "f_stk".to_string(),
+            source_eid: "dtn://peer/files".to_string(),
+            destination_eid: "dtn://stata/files".to_string(),
+            creation_timestamp: now_ms,
+            lifetime_secs: 10,
+            expiry_timestamp: now_ms - 5000, // expired, but sticky!
+            size: 1000,
+            payload_path: f_stk_path.to_string_lossy().to_string(),
+            mime_type: "application/octet-stream".to_string(),
+            is_sticky: true,
+            is_read: false,
+            created_at: "2026-11-05T00:00:00Z".to_string(),
+        };
+        storage.insert_file_bundle(&f_stk).unwrap();
+
+        // Tier 1: Expired chat (timestamp = 100)
+        let c_exp = ChatMessage {
+            id: "c_exp".to_string(),
+            conversation_peer: "dtn://peer/chat".to_string(),
+            sender_eid: "dtn://peer/chat".to_string(),
+            recipient_eid: "dtn://stata/chat".to_string(),
+            content: "Expired chat message".to_string(),
+            direction: "inbound".to_string(),
+            status: "received".to_string(),
+            is_read: true,
+            is_sticky: false,
+            timestamp: 100,
+            expiry_timestamp: now_ms - 1000, // expired!
+            created_at: "2026-11-05T00:00:00Z".to_string(),
+        };
+        storage.insert_chat_message(&c_exp).unwrap();
+
+        // Tier 2: Expired file (creation_timestamp = 200)
+        let f_exp_path = storage.files_dir().join("exp.bin");
+        std::fs::write(&f_exp_path, vec![0xBB; 1000]).unwrap();
+        let f_exp = FileBundleRecord {
+            id: "f_exp".to_string(),
+            source_eid: "dtn://peer/files".to_string(),
+            destination_eid: "dtn://stata/files".to_string(),
+            creation_timestamp: 200,
+            lifetime_secs: 10,
+            expiry_timestamp: now_ms - 1000, // expired!
+            size: 1000,
+            payload_path: f_exp_path.to_string_lossy().to_string(),
+            mime_type: "application/octet-stream".to_string(),
+            is_sticky: false,
+            is_read: false,
+            created_at: "2026-11-05T00:00:00Z".to_string(),
+        };
+        storage.insert_file_bundle(&f_exp).unwrap();
+
+        // Tier 3: Active chat (timestamp = 300)
+        let c_act = ChatMessage {
+            id: "c_act".to_string(),
+            conversation_peer: "dtn://peer/chat".to_string(),
+            sender_eid: "dtn://peer/chat".to_string(),
+            recipient_eid: "dtn://stata/chat".to_string(),
+            content: "Active chat message".to_string(),
+            direction: "inbound".to_string(),
+            status: "received".to_string(),
+            is_read: true,
+            is_sticky: false,
+            timestamp: 300,
+            expiry_timestamp: now_ms + 100000, // valid/active
+            created_at: "2026-11-05T00:00:00Z".to_string(),
+        };
+        storage.insert_chat_message(&c_act).unwrap();
+
+        // Tier 4: Active file (creation_timestamp = 400)
+        let f_act_path = storage.files_dir().join("act.bin");
+        std::fs::write(&f_act_path, vec![0xCC; 1000]).unwrap();
+        let f_act = FileBundleRecord {
+            id: "f_act".to_string(),
+            source_eid: "dtn://peer/files".to_string(),
+            destination_eid: "dtn://stata/files".to_string(),
+            creation_timestamp: 400,
+            lifetime_secs: 100,
+            expiry_timestamp: now_ms + 100000, // valid/active
+            size: 1000,
+            payload_path: f_act_path.to_string_lossy().to_string(),
+            mime_type: "application/octet-stream".to_string(),
+            is_sticky: false,
+            is_read: false,
+            created_at: "2026-11-05T00:00:00Z".to_string(),
+        };
+        storage.insert_file_bundle(&f_act).unwrap();
+
+        // All 6 items currently exist
+        assert_eq!(storage.list_file_bundles().unwrap().len(), 3);
+        assert_eq!(
+            storage
+                .get_conversation_messages("dtn://peer/chat")
+                .unwrap()
+                .len(),
+            3
+        );
+
+        let initial_usage = storage.current_storage_usage();
+        assert!(initial_usage >= 3000); // at least the 3x 1000B files
+
+        // Step 1: Set quota to initial_usage and request 200 bytes.
+        // Tier 1 (c_exp, ~276 bytes) must be evicted, satisfying the 200 bytes.
+        storage.set_max_storage_bytes(initial_usage);
+        storage.ensure_capacity(200).unwrap();
+
+        // Tier 1 (c_exp) should be evicted first!
+        let remaining_msgs = storage
+            .get_conversation_messages("dtn://peer/chat")
+            .unwrap();
+        assert!(
+            remaining_msgs.iter().all(|m| m.id != "c_exp"),
+            "Tier 1 (expired chat) must be evicted first"
+        );
+        assert!(remaining_msgs.iter().any(|m| m.id == "c_stk"));
+        assert!(remaining_msgs.iter().any(|m| m.id == "c_act"));
+        // Tier 2 file f_exp must still be present!
+        assert!(storage.get_file_bundle("f_exp").unwrap().is_some());
+
+        // Step 2: Request 800 more bytes, forcing eviction of Tier 2 (f_exp, 1000 bytes)
+        let usage_after_t1 = storage.current_storage_usage();
+        storage.set_max_storage_bytes(usage_after_t1);
+        storage.ensure_capacity(800).unwrap();
+
+        // Tier 2 (f_exp) must be evicted next and its file removed from disk
+        assert!(storage.get_file_bundle("f_exp").unwrap().is_none());
+        assert!(
+            !f_exp_path.exists(),
+            "f_exp payload file must be removed from disk"
+        );
+        // Sticky and active files remain
+        assert!(storage.get_file_bundle("f_stk").unwrap().is_some());
+        assert!(storage.get_file_bundle("f_act").unwrap().is_some());
+        // Active chat c_act must still be present!
+        let msgs_after_t2 = storage
+            .get_conversation_messages("dtn://peer/chat")
+            .unwrap();
+        assert!(msgs_after_t2.iter().any(|m| m.id == "c_act"));
+
+        // Step 3: Request 200 more bytes, forcing eviction of Tier 3 (c_act, ~276 bytes)
+        let usage_after_t2 = storage.current_storage_usage();
+        storage.set_max_storage_bytes(usage_after_t2);
+        storage.ensure_capacity(200).unwrap();
+
+        let msgs_after_t3 = storage
+            .get_conversation_messages("dtn://peer/chat")
+            .unwrap();
+        assert!(msgs_after_t3.iter().all(|m| m.id != "c_act"));
+        assert!(msgs_after_t3.iter().any(|m| m.id == "c_stk")); // Sticky kept!
+        // Tier 4 file f_act must still be present!
+        assert!(storage.get_file_bundle("f_act").unwrap().is_some());
+
+        // Step 4: Request 800 more bytes, forcing eviction of Tier 4 (f_act, 1000 bytes)
+        let usage_after_t3 = storage.current_storage_usage();
+        storage.set_max_storage_bytes(usage_after_t3);
+        storage.ensure_capacity(800).unwrap();
+
+        assert!(storage.get_file_bundle("f_act").unwrap().is_none());
+        assert!(
+            !f_act_path.exists(),
+            "f_act payload file must be removed from disk"
+        );
+        // Sticky file STILL preserved!
+        assert!(storage.get_file_bundle("f_stk").unwrap().is_some());
+        assert!(
+            f_stk_path.exists(),
+            "f_stk payload file must NOT be removed (sticky)"
+        );
+
+        // Step 5: Now only sticky items remain (c_stk and f_stk).
+        // If quota is exceeded and only sticky items remain, ensure_capacity MUST fail!
+        let usage_only_sticky = storage.current_storage_usage();
+        storage.set_max_storage_bytes(usage_only_sticky);
+        let res = storage.ensure_capacity(1000);
+        assert!(
+            res.is_err(),
+            "Must reject incoming bundle when all remaining items are sticky"
         );
     }
 }

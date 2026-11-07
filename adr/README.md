@@ -19,4 +19,5 @@ This directory contains records of the major architectural and design decisions 
 13. [ADR 13: Dedicated Internal Files Service, BUNDLE_LIST Viewer & Sticky Retention Policy](0013-internal-files-service-and-sticky-retention.md)
 14. [ADR 14: Dynamic Static Routing, Out-of-the-Box Gateway Peering & TCPCL Contact Coordinator](0014-dynamic-static-routing-and-tcpcl-peering-coordinator.md)
 15. [ADR 15: KISS Transport Leaky-Bucket Rate Limiter & Half-Duplex Checkpoint Pacing](0015-kiss-leaky-bucket-and-half-duplex-pacing.md)
+16. [ADR 16: Application Storage Quota, LRU Eviction Cascade & Visual Lifetime Expiration](0016-application-storage-quota-and-visual-expiration.md)
 

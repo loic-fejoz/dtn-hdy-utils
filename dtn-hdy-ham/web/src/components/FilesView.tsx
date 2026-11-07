@@ -341,7 +341,19 @@ export function FilesView({
               <div>
                 <span class="text-slate-400 block mb-0.5 font-medium">Lifetime / Expiry</span>
                 <span class="text-slate-800 dark:text-slate-200">
-                  {detailData.bundle.lifetime_secs}s (expires: {formatDate(detailData.bundle.expiry_timestamp)})
+                  {detailData.bundle.lifetime_secs}s (
+                  {detailData.bundle.expiry_timestamp > 0 &&
+                  detailData.bundle.expiry_timestamp <= Date.now() ? (
+                    <span
+                      class="text-amber-600 dark:text-amber-400 font-semibold cursor-help"
+                      title="Retained under station storage quota"
+                    >
+                      ⏳ Expired on {formatDate(detailData.bundle.expiry_timestamp)}
+                    </span>
+                  ) : (
+                    `expires: ${formatDate(detailData.bundle.expiry_timestamp)}`
+                  )}
+                  )
                 </span>
               </div>
 
@@ -530,6 +542,17 @@ export function FilesView({
                         {b.is_sticky && (
                           <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
                             📌 STICKY
+                          </span>
+                        )}
+
+                        {b.expiry_timestamp > 0 && b.expiry_timestamp <= Date.now() && (
+                          <span
+                            class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 flex items-center space-x-1 cursor-help"
+                            title={`Lifetime expired on ${formatDate(
+                              b.expiry_timestamp
+                            )} — retained under station storage quota`}
+                          >
+                            <span>⏳ EXPIRED</span>
                           </span>
                         )}
                       </div>

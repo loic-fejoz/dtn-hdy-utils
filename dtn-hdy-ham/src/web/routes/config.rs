@@ -23,6 +23,12 @@ pub async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
             "data_dir": config.storage.data_dir,
             "sqlite_path": config.storage.effective_db_path(),
         },
+        "application": {
+            "quota": {
+                "max_storage": state.internal_storage.max_storage_bytes(),
+                "used_storage": state.internal_storage.current_storage_usage(),
+            }
+        },
         "grpc": {
             "enabled": config.grpc.enabled,
             "address": config.grpc.address.to_string(),

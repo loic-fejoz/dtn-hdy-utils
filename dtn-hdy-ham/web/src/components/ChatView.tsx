@@ -11,7 +11,9 @@ export interface ChatMessage {
   direction: 'inbound' | 'outbound';
   status: 'queued' | 'sent' | 'received';
   is_read: boolean;
+  is_sticky?: boolean;
   timestamp: number;
+  expiry_timestamp?: number;
   created_at: string;
 }
 
@@ -493,6 +495,11 @@ export function ChatView({
                 ) : (
                   messages.map((m) => {
                     const isOutbound = m.direction === 'outbound';
+                    const nowMs = Date.now();
+                    const isExpired =
+                      m.expiry_timestamp &&
+                      m.expiry_timestamp > 0 &&
+                      m.expiry_timestamp <= nowMs;
 
                     return (
                       <div
@@ -501,6 +508,8 @@ export function ChatView({
                       >
                         <div
                           class={`max-w-[80%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 shadow-sm text-sm ${
+                            isExpired ? 'opacity-70 border-dashed border-amber-500/50 ' : ''
+                          }${
                             isOutbound
                               ? 'bg-emerald-600 text-white dark:bg-emerald-700 rounded-br-none'
                               : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-bl-none'
@@ -512,12 +521,25 @@ export function ChatView({
                             dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
                           />
 
-                          {/* Footer: timestamp & delivery status */}
+                          {/* Footer: timestamp, expiry & delivery status */}
                           <div
                             class={`mt-1 flex items-center justify-end space-x-1 text-[10px] ${
                               isOutbound ? 'text-emerald-100' : 'text-slate-400'
                             }`}
                           >
+                            {m.is_sticky && (
+                              <span title="Pinned/sticky: protected against quota eviction">📌</span>
+                            )}
+                            {isExpired && (
+                              <span
+                                class="cursor-help"
+                                title={`Lifetime expired on ${new Date(
+                                  m.expiry_timestamp!
+                                ).toLocaleString()} — retained under station storage quota`}
+                              >
+                                ⏳
+                              </span>
+                            )}
                             <span>{formatMessageTime(m.created_at)}</span>
                             {isOutbound && (
                               <span

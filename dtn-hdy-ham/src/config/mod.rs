@@ -33,6 +33,10 @@ pub struct HamConfig {
     /// Bundle storage settings (SQLite database).
     pub storage: StorageConfig,
 
+    /// Application service settings (Chat, Files, and storage quota).
+    #[serde(default)]
+    pub application: ApplicationConfig,
+
     /// Local gRPC application server settings.
     pub grpc: GrpcConfig,
 
@@ -61,6 +65,7 @@ impl Default for HamConfig {
             node_id: default_node_id(),
             admin_endpoints: Vec::new(),
             storage: StorageConfig::default(),
+            application: ApplicationConfig::default(),
             grpc: GrpcConfig::default(),
             web: None,
             clas: Vec::new(),
@@ -137,6 +142,125 @@ impl StorageConfig {
     pub fn effective_payload_dir(&self) -> PathBuf {
         self.effective_data_dir().join("payloads")
     }
+}
+
+/// Application service settings (e.g. Chat, Files, and storage quota).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct ApplicationConfig {
+    /// Storage quota policy.
+    pub quota: QuotaConfig,
+}
+
+/// Application storage quota configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct QuotaConfig {
+    /// Maximum disk space allowed for application data (chat DB + files payload dir).
+    /// Accepts numbers (e.g. `314572800`) or human-readable strings (e.g. `"300MB"`, `"300MiB"`, `"1GB"`).
+    /// Defaults to 300 MB (314,572,800 bytes).
+    #[serde(
+        deserialize_with = "deserialize_byte_size",
+        serialize_with = "serialize_byte_size"
+    )]
+    pub max_storage: u64,
+}
+
+pub const DEFAULT_APP_MAX_STORAGE_BYTES: u64 = 300 * 1024 * 1024; // 300 MB
+
+impl Default for QuotaConfig {
+    fn default() -> Self {
+        Self {
+            max_storage: DEFAULT_APP_MAX_STORAGE_BYTES,
+        }
+    }
+}
+
+/// Parses human-readable byte sizes (e.g. `"300MB"`, `"300MiB"`, `"1GB"` or numeric `"1024"`).
+pub fn parse_byte_size(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty byte size".to_string());
+    }
+    if let Ok(n) = s.parse::<u64>() {
+        return Ok(n);
+    }
+    let num_end = s
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(s.len());
+    let (num_str, unit_str) = s.split_at(num_end);
+    let val: f64 = num_str
+        .trim()
+        .parse()
+        .map_err(|e| format!("invalid number '{num_str}': {e}"))?;
+    let unit = unit_str.trim().to_uppercase();
+    let multiplier: f64 = match unit.as_str() {
+        "" | "B" | "BYTES" => 1.0,
+        "K" | "KB" | "KIB" => 1024.0,
+        "M" | "MB" | "MIB" => 1024.0 * 1024.0,
+        "G" | "GB" | "GIB" => 1024.0 * 1024.0 * 1024.0,
+        "T" | "TB" | "TIB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        other => return Err(format!("unknown byte unit '{other}'")),
+    };
+    Ok((val * multiplier) as u64)
+}
+
+fn deserialize_byte_size<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct ByteSizeVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for ByteSizeVisitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a byte size string (e.g. '300MB', '500KB') or an integer")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            if value < 0 {
+                return Err(E::custom("byte size cannot be negative"));
+            }
+            Ok(value as u64)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            parse_byte_size(value).map_err(E::custom)
+        }
+    }
+
+    deserializer.deserialize_any(ByteSizeVisitor)
+}
+
+fn serialize_byte_size<S>(val: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let bytes = *val;
+    let s = if bytes > 0 && bytes.is_multiple_of(1024 * 1024 * 1024) {
+        format!("{}GB", bytes / (1024 * 1024 * 1024))
+    } else if bytes > 0 && bytes.is_multiple_of(1024 * 1024) {
+        format!("{}MB", bytes / (1024 * 1024))
+    } else if bytes > 0 && bytes.is_multiple_of(1024) {
+        format!("{}KB", bytes / 1024)
+    } else {
+        format!("{bytes}B")
+    };
+    serializer.serialize_str(&s)
 }
 
 /// gRPC application interface settings.
@@ -310,5 +434,57 @@ impl HamConfig {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_byte_size() {
+        assert_eq!(parse_byte_size("1024").unwrap(), 1024);
+        assert_eq!(parse_byte_size("1024B").unwrap(), 1024);
+        assert_eq!(parse_byte_size("1KB").unwrap(), 1024);
+        assert_eq!(parse_byte_size("1KiB").unwrap(), 1024);
+        assert_eq!(parse_byte_size("300MB").unwrap(), 300 * 1024 * 1024);
+        assert_eq!(parse_byte_size("300MiB").unwrap(), 300 * 1024 * 1024);
+        assert_eq!(
+            parse_byte_size("1.5GB").unwrap(),
+            (1.5 * 1024.0 * 1024.0 * 1024.0) as u64
+        );
+        assert_eq!(parse_byte_size(" 500 MB ").unwrap(), 500 * 1024 * 1024);
+        assert!(parse_byte_size("").is_err());
+        assert!(parse_byte_size("invalid").is_err());
+        assert!(parse_byte_size("100XYZ").is_err());
+    }
+
+    #[test]
+    fn test_serde_application_quota_config() {
+        // 1. With human-readable string "500MB"
+        let yaml_str = r#"
+application:
+  quota:
+    max-storage: "500MB"
+"#;
+        let cfg: HamConfig = serde_yaml::from_str(yaml_str).unwrap();
+        assert_eq!(cfg.application.quota.max_storage, 500 * 1024 * 1024);
+
+        // 2. With numeric value
+        let yaml_num = r#"
+application:
+  quota:
+    max-storage: 10485760
+"#;
+        let cfg_num: HamConfig = serde_yaml::from_str(yaml_num).unwrap();
+        assert_eq!(cfg_num.application.quota.max_storage, 10485760);
+
+        // 3. Omitted (default 300MB)
+        let yaml_default = "node-id: 'dtn://test/'";
+        let cfg_default: HamConfig = serde_yaml::from_str(yaml_default).unwrap();
+        assert_eq!(
+            cfg_default.application.quota.max_storage,
+            DEFAULT_APP_MAX_STORAGE_BYTES
+        );
     }
 }

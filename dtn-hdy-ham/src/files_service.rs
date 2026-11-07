@@ -115,6 +115,15 @@ impl FilesService {
         let filename = format!("{safe_name}.{ext}");
         let payload_path = self.storage.files_dir().join(&filename);
 
+        // Ensure storage capacity under quota policy before saving to disk
+        if let Err(e) = self.storage.ensure_capacity(payload_slice.len() as u64) {
+            warn!(
+                "FilesService: storage quota exceeded for incoming bundle {}: {}",
+                bundle_id, e
+            );
+            return Ok(());
+        }
+
         // Save payload file to disk with graceful error handling (disk full / permission denied)
         if let Err(e) = std::fs::write(&payload_path, payload_slice) {
             error!(
