@@ -22,8 +22,8 @@ clas:
       port: 0
       rate-limit-bytes-per-sec: 1200
       burst-capacity-bytes: 1024
-    hailing-encodings: "gzip, chunk(150), h, crc(32), rs(255, 233)"
-    default-bundle-encodings: "gzip, chunk(150), h, crc(32), rs(255, 233)"
+    hailing-encodings: "gzip, chunk(150), crc32, h, rs(255, 233)"
+    default-bundle-encodings: "gzip, chunk(150), crc32, h, rs(255, 233)"
     peers:
       - callsign: "STATB"
         node-id: "dtn://statb.ampr.org/"

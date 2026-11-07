@@ -8,9 +8,9 @@ fn test_custom_encodings_pipeline() {
     let encs = vec![
         ContentEncoding::Gzip,
         ContentEncoding::Chunk(150),
+        ContentEncoding::Crc32,
         ContentEncoding::H,
         ContentEncoding::ReedSolomon(255, 233),
-        ContentEncoding::Crc32,
     ];
 
     let mut pdu_gen = PDUGenerator::new(
