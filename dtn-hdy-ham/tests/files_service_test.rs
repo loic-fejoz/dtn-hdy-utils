@@ -44,6 +44,7 @@ async fn test_files_service_workflow_and_degraded_cases() {
     let files_service = Arc::new(dtn_hdy_ham::files_service::FilesService::new(
         server.internal_storage(),
         server.service_tracker(),
+        server.keystore(),
     ));
     server
         .service_tracker()
@@ -70,6 +71,7 @@ async fn test_files_service_workflow_and_degraded_cases() {
         internal_storage: internal_storage.clone(),
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
+        keystore: server.keystore(),
     };
     let app = create_router(state);
 
@@ -412,6 +414,7 @@ async fn test_files_payload_range_requests_and_mime_detection() {
         expiry_timestamp: 12345 + 3600 * 1000,
         is_sticky: false,
         is_read: false,
+        auth_status: "unsigned".to_string(),
     };
     internal_storage.insert_file_bundle(&record).unwrap();
 
@@ -439,6 +442,7 @@ async fn test_files_payload_range_requests_and_mime_detection() {
         internal_storage,
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
+        keystore: server.keystore(),
     };
     let app = create_router(app_state);
 

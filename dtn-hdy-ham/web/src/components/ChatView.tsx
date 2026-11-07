@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { renderMarkdown, escapeHtml } from '../utils/markdown';
+import { SecurityBadge } from './SecurityBadge';
 
 export interface ChatMessage {
   id: string;
@@ -15,6 +16,7 @@ export interface ChatMessage {
   timestamp: number;
   expiry_timestamp?: number;
   created_at: string;
+  auth_status?: string;
 }
 
 export interface ConversationSummary {
@@ -527,6 +529,7 @@ export function ChatView({
                               isOutbound ? 'text-emerald-100' : 'text-slate-400'
                             }`}
                           >
+                            <SecurityBadge status={m.auth_status} compact={true} className="mr-0.5" />
                             {m.is_sticky && (
                               <span title="Pinned/sticky: protected against quota eviction">📌</span>
                             )}

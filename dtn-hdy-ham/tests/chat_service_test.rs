@@ -48,6 +48,7 @@ async fn test_chat_service_full_workflow() {
     let chat_service = Arc::new(dtn_hdy_ham::chat_service::ChatService::new(
         server.chat_manager(),
         server.service_tracker(),
+        server.keystore(),
     ));
     server
         .service_tracker()
@@ -74,6 +75,7 @@ async fn test_chat_service_full_workflow() {
         internal_storage,
         route_manager: server.route_manager(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
+        keystore: server.keystore(),
     };
     let app = create_router(state);
 

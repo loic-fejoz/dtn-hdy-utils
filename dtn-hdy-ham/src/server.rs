@@ -34,6 +34,7 @@ pub struct HamServer {
     cla_manager: crate::cla_manager::ClaManager,
     chat_manager: crate::chat_manager::ChatManager,
     route_manager: Arc<crate::routing::RouteManager>,
+    keystore: Arc<crate::security::DirectionalKeyStore>,
     _ephemeral_dir: Option<tempfile::TempDir>,
     tasks: TaskPool,
 }
@@ -444,6 +445,17 @@ impl HamServer {
 
         let service_tracker = crate::service_tracker::ServiceTracker::new(bpa.clone());
 
+        // Keystore setup with 0600 file permissions
+        let keystore = if config.storage.in_memory {
+            Arc::new(crate::security::DirectionalKeyStore::empty())
+        } else {
+            let data_dir = config.storage.effective_data_dir();
+            let keystore_path = data_dir.join("keystore.toml");
+            Arc::new(crate::security::DirectionalKeyStore::load_or_init(
+                &keystore_path,
+            )?)
+        };
+
         Ok(Self {
             config,
             bpa,
@@ -455,6 +467,7 @@ impl HamServer {
             cla_manager,
             chat_manager,
             route_manager,
+            keystore,
             _ephemeral_dir: ephemeral_dir,
             tasks,
         })
@@ -485,6 +498,7 @@ impl HamServer {
         let chat_service = Arc::new(crate::chat_service::ChatService::new(
             self.chat_manager.clone(),
             self.service_tracker.clone(),
+            self.keystore.clone(),
         ));
         let chat_service_id = hardy_bpv7::eid::Service::Dtn("chat".into());
         match self
@@ -504,6 +518,7 @@ impl HamServer {
         let files_service = Arc::new(crate::files_service::FilesService::new(
             self.chat_manager.clone(),
             self.service_tracker.clone(),
+            self.keystore.clone(),
         ));
         let files_service_id = hardy_bpv7::eid::Service::Dtn("files".into());
         match self
@@ -627,6 +642,7 @@ impl HamServer {
                 internal_storage: self.chat_manager.clone(),
                 route_manager: self.route_manager.clone(),
                 log_buffer: crate::log_buffer::LogBuffer::global(),
+                keystore: self.keystore.clone(),
             };
             let cancel = self.tasks.cancel_token().clone();
             let addr = web_config.address;
@@ -707,5 +723,11 @@ impl HamServer {
     #[must_use]
     pub fn internal_storage(&self) -> crate::internal_storage::InternalStorage {
         self.chat_manager.clone()
+    }
+
+    /// Accessor for the station directional keystore.
+    #[must_use]
+    pub fn keystore(&self) -> Arc<crate::security::DirectionalKeyStore> {
+        self.keystore.clone()
     }
 }

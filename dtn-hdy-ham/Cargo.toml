@@ -14,7 +14,7 @@ instrument = ["hardy-async/instrument", "hardy-bpa/instrument", "tracing/attribu
 [dependencies]
 hardy-async = { version = "0.2", path = "../../hardy/async", features = ["watcher"] }
 hardy-bpa = { version = "0.2", path = "../../hardy/bpa", default-features = false, features = ["serde", "rfc9173", "tokio"] }
-hardy-bpv7 = { version = "0.6", path = "../../hardy/bpv7", features = ["serde"] }
+hardy-bpv7 = { version = "0.6", path = "../../hardy/bpv7", features = ["serde", "rfc9173"] }
 hardy-echo-service = { version = "0.2", path = "../../hardy/echo-service" }
 hardy-eid-patterns = { version = "0.4", path = "../../hardy/eid-patterns", features = ["serde", "dtn-pat-item"] }
 hardy-proto = { version = "0.2", path = "../../hardy/proto", features = ["serde"] }
@@ -44,6 +44,12 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 axum = { version = "0.8", features = ["multipart", "macros"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 tempfile = "3"
+hex = "0.4"
+toml = "0.8"
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2"
+zeroize = { version = "1.8", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

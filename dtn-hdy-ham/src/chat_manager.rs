@@ -50,6 +50,7 @@ mod tests {
             timestamp: 1000,
             expiry_timestamp: 86401000,
             created_at: "2026-11-04T12:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         manager.insert_message(&msg).unwrap();

@@ -172,8 +172,30 @@ async fn do_send_chat_message(
         }
     };
 
+    let dest_str = recipient_eid.to_string();
+    let (binbundle_vec, auth_status) =
+        if let Some(key) = state.keystore.find_outbound_key(&dest_str) {
+            tracing::info!(
+                "Signing chat message with BPSec BIB key pattern '{}'",
+                key.pattern
+            );
+            match crate::security::sign_bundle_with_key(&bundle, &binbundle, &key, None) {
+                Ok(bytes) => (bytes, "valid".to_string()),
+                Err(e) => {
+                    error!("Failed to sign chat bundle with BPSec key: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": format!("Failed to sign chat message: {e}") })),
+                    )
+                        .into_response();
+                }
+            }
+        } else {
+            (binbundle.into_vec(), "unsigned".to_string())
+        };
+
     let bundle_id = bundle.primary.id.to_key();
-    let bundle_bytes = Bytes::from(binbundle.into_vec());
+    let bundle_bytes = Bytes::from(binbundle_vec);
 
     let dt = bundle
         .primary
@@ -203,6 +225,7 @@ async fn do_send_chat_message(
         timestamp,
         expiry_timestamp,
         created_at,
+        auth_status,
     };
 
     info!(

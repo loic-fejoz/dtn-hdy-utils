@@ -5,6 +5,7 @@ pub mod chat;
 pub mod clas;
 pub mod config;
 pub mod files;
+pub mod security;
 pub mod services;
 pub mod static_routes;
 

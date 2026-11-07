@@ -327,10 +327,95 @@ flowchart TD
    * Define additional service EIDs (e.g. `dtn://<callsign>/files`, `dtn://beacon/`, `dtn://<callsign>/telemetry`).
    * Assign visual viewer modes (`CHAT`, `BUNDLE_LIST`, `SENML_LAST`).
    * Enable/disable multicast/broadcast promiscuous listening.
-2. **BPSec BIB Key & Policy Vault (`/api/v1/security`)**:
-   * Manage HMAC-SHA256 symmetric keys (RFC 9103) for bundle signing and verification.
-   * Configurable validation policy: *No Check*, *Warn Only*, or *Strict Rejection*.
-   * Key status and signature validation summary cards.
+2. [x] **BPSec BIB Key & Policy Vault (`/api/v1/security`) (ADR 0020)**:
+   * Manage HMAC-SHA256 symmetric keys (RFC 9103 / RFC 9172) with strict inbound/outbound directional separation.
+   * Specificity pattern matching (`dtn://*`, `dtn://f5kuv/*`, `dtn://*/chat`, `ipn:0.1.*`).
+   * Configurable validation policy: *Warn* (default), *Strict* (drop invalid signatures), or *Ignore*.
+   * In-browser key vault integrated into `ConfigView.tsx` with 256-bit random key generator and POSIX `0600` protection (`keystore.toml`).
+   * Visual trust badges across Chat, Files, and Bundles.
+
+---
+
+### Phase 6bis: BPSec Cybersecurity Hardening, Cryptographic Integrity & Rust Reliability
+> **Goal**: Remediate cryptographic edge cases, eliminate unprotected `.unwrap()` calls, enforce atomic secret storage, and remove redundant CBOR parsing/memory copies identified during the post-implementation cybersecurity audit of `ADR 0020`.
+> **Scope Note**: Web application user authentication/authorization (IAM) is intentionally out of scope at this stage. CORS origin rules remain unchanged.
+
+#### Deliverables (Cryptographic & BPSec Protocol Hardening):
+1. [x] **[Crypto / Spoofing] Enforce Identity Binding Between BIB `security_source` and Bundle `primary.source` & Mandatory Payload Block (#1) Coverage (`dtn-hdy-ham/src/security/keystore.rs`)**:
+   * **Root Cause**:
+     * In `verify_bundle` (`dtn-hdy-ham/src/security/keystore.rs`), `sec_source` is extracted from `parsed.bibs.values().next()` (an arbitrary entry in an unordered `HashMap`) and looked up in `keystore.find_inbound_key(&sec_source_str)`, without checking that `sec_source` belongs to the same node as `parsed.bundle.primary.id.source`. A third-party node $C$ holding a valid inbound key could craft a bundle with `primary.source = dtn://f5kuv/chat` and `bib.security_source = dtn://station_c/chat`, causing `ChatService` and `FilesService` to attribute the message to `F5KUV` with a green `Valid` badge.
+     * Additionally, if a BIB block only targets an extension or primary block and does not target the payload block (`#1`), `begin_payload_verification` returns an empty `verifiers` collection and `verify_bundle` still returns `AuthStatus::Valid`.
+   * **Specification & Remediation**:
+     * Verify that a BIB operation specifically targets payload block `#1` (`parsed.bibs.get(&1)`). If no BIB targets block `#1`, the payload is not authenticated (`AuthStatus::Invalid` if other BIBs exist without covering payload, or `AuthStatus::Unsigned` if no BIB exists).
+     * Enforce identity concordance: normalize both `bib_op.source()` and `parsed.bundle.primary.id.source` to their node identity (`normalize_peer_node` or exact EID/node match, e.g., `dtn://f5kuv/` or `ipn:N.*`). If the BIB security source node does not match the primary bundle source node, immediately return `AuthStatus::Invalid`.
+     * Ensure `verifiers` from `begin_payload_verification` is non-empty and covers target block `#1` before returning `AuthStatus::Valid`.
+     * Match the inbound key against `parsed.bundle.primary.id.source.to_string()` (so service-specific inbound patterns like `dtn://*/chat` or `dtn://f5kuv/chat` work consistently even if `bib.security_source` is the node-level EID `dtn://f5kuv/`).
+
+2. [x] **[Crypto / Trust Spoofing] Perform Real Cryptographic Verification in Bundle Inspector & Align Policy / Badge Semantics (`dtn-hdy-ham/src/bundle_inspector.rs`, `chat_service.rs`, `files_service.rs`, `SecurityBadge.tsx`)**:
+   * **Root Cause**:
+     * In `list_bundles_from_db` (`dtn-hdy-ham/src/bundle_inspector.rs`), `auth_status` is set to `"valid"` whenever a block with `block_type == 11` (`BlockIntegrity`) exists in the SQLite JSON metadata (`let auth_status = if has_bib { "valid" } else { "unsigned" };`), without verifying the HMAC or consulting the `DirectionalKeyStore`. Any forged or corrupted BIB displays as `🛡️ Authentifié` in `BundlesView.tsx`.
+     * In `ChatService::handle_delivered_bundle` and `FilesService::handle_delivered_bundle`, `verify_bundle` is executed even when `policy == VerifyPolicy::Ignore`.
+     * UI badge requirement: `MissingKey` must display the same neutral icon (`❓`) as `Unsigned`.
+   * **Specification & Remediation**:
+     * Pass `&DirectionalKeyStore` (and `payload_dir: &Path`) into `list_bundles_from_db` and `get_bundle_detail` (or verify against the stored bundle file in `payload_dir` when `has_bib` is true) so `BundleSummary.auth_status` and `BundleDetail.auth_status` reflect actual `verify_bundle` results (`valid`, `invalid`, `missing_key`, `unsigned`).
+     * In `verify_bundle` (or at the start of `ChatService` / `FilesService` / `bundle_inspector`), if `keystore.get_policy() == VerifyPolicy::Ignore`, short-circuit immediately and return `AuthStatus::Unsigned` without running cryptographic checks.
+     * In `VerifyPolicy::Strict`, keep rejecting **only** `AuthStatus::Invalid` bundles; `AuthStatus::Unsigned` and `AuthStatus::MissingKey` must be accepted.
+     * In `dtn-hdy-ham/web/src/components/SecurityBadge.tsx`, update the `missing_key` branch to use the same `❓` icon and neutral slate styling as `unsigned` (while preserving a descriptive tooltip/title if helpful, or unifying visual presentation with `unsigned`), and update `dtn-hdy-ham/web/tests/security.spec.ts` accordingly.
+
+3. [x] **[Routing & Key Selection] Deterministic Hierarchical Pattern Specificity, `(direction, pattern)` Uniqueness & Fail-Closed Outbound Signing (`dtn-hdy-ham/src/security/keystore.rs`, `web/routes/security.rs`, `web/routes/bundles.rs`, `web/routes/chat.rs`)**:
+   * **Root Cause**:
+     * `pattern_specificity` in `keystore.rs` scores patterns purely by counting non-`*` characters (`pattern.chars().filter(|c| *c != '*').count()`). Consequently, a generic service wildcard with a long service name (`dtn://*/long_service_name`, score 24) outranks a specific station node key (`dtn://f5kuv/*`, score 12).
+     * `add_key` allows inserting multiple keys with the exact same `(direction, pattern)` and generates IDs from `OffsetDateTime::now_utc().unix_timestamp_nanos()`, which can collide on fast consecutive calls.
+     * In `web/routes/bundles.rs` and `web/routes/chat.rs`, if `sign_bundle_with_key` returns `Err`, the code logs a `warn!` and dispatches the bundle unsigned (fail-open).
+   * **Specification & Remediation**:
+     * Implement a deterministic tier-based specificity function `pattern_specificity(pattern: &str) -> (u8, usize)` returning a tuple `(tier, non_wildcard_len)`:
+       1. **Tier 5 (Exact EID, no `*`)**: e.g. `dtn://f5kuv/serviceb`, `ipn:1.2`
+       2. **Tier 4 (Specific Node + Wildcard Service)**: e.g. `dtn://f5kuv/*`, `ipn:0.1.*` (prefix before `/` or last `.` has no `*`, suffix has `*`)
+       3. **Tier 3 (Wildcard Node + Specific Service)**: e.g. `dtn://*/servicea` (node part has `*`, service part has no `*`)
+       4. **Tier 2 (Scheme Wildcard)**: e.g. `dtn://*`, `ipn:*`
+       5. **Tier 1 (Global Wildcard)**: `*`
+     * Enforce uniqueness on `(direction, pattern)` in `DirectionalKeyStore::add_key`: if an entry with the same `direction` and normalized `pattern` already exists, either replace/update it in place or return an explicit error (`409 Conflict` in `POST /api/v1/security/keys`), and generate collision-free key IDs (e.g. monotonic atomic counter combined with random bytes or timestamp).
+     * Make outbound signing strictly **Fail-Closed**: in `web/routes/bundles.rs` (`build_and_inject_bundle`) and `web/routes/chat.rs` (`do_send_chat_message`), if `find_outbound_key` returns `Some(key)` and `sign_bundle_with_key` fails, abort bundle injection and return `StatusCode::INTERNAL_SERVER_ERROR` with the signing error message.
+
+4. [x] **[Secrets & Storage Security] Key Format Disambiguation, Minimum Key Length, Domain-Separated Fingerprint, Atomic `0600` File Creation & Memory Zeroization (`dtn-hdy-ham/src/security/keystore.rs`, `dtn-hdy-ham/Cargo.toml`)**:
+   * **Root Cause**:
+     * `parse_key_input` treats any even-length string $\ge 16$ chars matching `[0-9a-fA-F]` as hex, causing hex-looking passphrases to be decoded to half their byte length, and accepts 1-byte keys.
+     * `compute_fingerprint` computes an unsalted `SHA256(secret)[..8]`, exposing short passphrases to offline dictionary attacks via `GET /api/v1/security/keys`.
+     * `DirectionalKeyStore::persist` calls `fs::write(path, toml_str)` before `fs::set_permissions(path, 0o600)`, creating a TOCTOU window where `keystore.toml` is created with default `umask` (`0644`), ignores `set_permissions` errors (`let _ = ...`), and truncates in place (non-atomic).
+     * `KeyEntry` and `KeyFileEntry` derive `Debug` on plaintext secret fields, and secrets are not zeroized in memory when dropped.
+   * **Specification & Remediation**:
+     * **Key Input Rules (`parse_key_input` & validation)**:
+       * Decode as hex **only** if prefixed with `0x`/`0X` or if the trimmed string is **exactly 64 ASCII hex characters** (256-bit key). Otherwise treat as a UTF-8 passphrase.
+       * Enforce minimum secret strength in `add_key`: require at least **16 bytes** (either $\ge 16$-byte UTF-8 passphrase or $\ge 16$-byte / 32-hex-char raw key; return `400 Bad Request` on shorter secrets).
+     * **Domain-Separated Fingerprint (`compute_fingerprint`)**:
+       * Compute `HMAC-SHA256(key = secret, message = b"dtn-hdy-ham-bpsec-fingerprint-v1")` (or salted SHA-256 with fixed domain separator) and encode the first 8 bytes as `SHA256:<16-hex-chars>`.
+     * **Atomic `0600` Persistence (`persist`)**:
+       * Write to a temporary file `<keystore_path>.tmp` opened on Unix with `std::os::unix::fs::OpenOptionsExt::mode(0o600)` (so the file is born with `0600` permissions before a single byte is written), `sync_all()`, explicitly enforce `set_permissions(0o600)` with `?` error propagation, and atomically `fs::rename(&tmp_path, path)?`.
+     * **Redacted `Debug` & `zeroize`**:
+       * Implement custom `fmt::Debug` for `KeyEntry` and `KeyFileEntry` printing `"<redacted>"` for `secret` / `key_hex`.
+       * Add `zeroize` (or manual zeroing in `Drop` for `KeyEntry` / `KeyFileEntry`) so secret bytes are overwritten with zeros on removal/drop.
+
+5. [x] **[Reliability & Performance] Eliminate Unprotected `.unwrap()` Calls & Redundant CBOR Parsing / Memory Copies (`dtn-hdy-ham/src/security/keystore.rs`, `chat_service.rs`, `files_service.rs`, `web/routes/bundles.rs`, `web/routes/chat.rs`)**:
+   * **Root Cause**:
+     * `DirectionalKeyStore` uses `.unwrap()` on all 12 `RwLock::read()` / `RwLock::write()` acquisitions, risking poison panic propagation across the daemon, and holds read locks while performing synchronous file I/O in `persist()`.
+     * In `sign_bundle_with_key`, the newly built bundle is copied (`Bytes::copy_from_slice`) and parsed, signed, and then parsed a second time just to return `hardy_bpv7::bundle::Bundle`.
+     * In `ChatService` and `FilesService`, `verify_bundle` copies the full bundle buffer (`Bytes::copy_from_slice`) and parses it, then `handle_delivered_bundle` immediately calls `hardy_bpv7::parse::parse(data)` a second time.
+   * **Specification & Remediation**:
+     * Replace all `RwLock::read().unwrap()` and `RwLock::write().unwrap()` in `keystore.rs` with `.unwrap_or_else(|poisoned| poisoned.into_inner())` (and audit modified files to ensure zero unprotected `.unwrap()` in production code).
+     * In `persist()`, clone the `KeystoreConfigFile` snapshot while holding the lock, `drop` the lock guards, and perform TOML serialization + disk write outside the lock.
+     * Refactor `sign_bundle_with_key` to accept `(&hardy_bpv7::bundle::Bundle, &[u8], &KeyEntry, Option<Eid>) -> Result<Vec<u8>>`, eliminating both the pre-parse and post-parse (since signing only adds a BIB block and never alters `bundle.primary.id`).
+     * Refactor `verify_bundle` to accept `Bytes` (or `&ParsedBundle` + `&Bytes`) so `ChatService` and `FilesService` parse the incoming `Bytes` **once** (zero-copy) and pass the parsed structure to verification and payload extraction.
+
+#### Verification & Acceptance Criteria for Phase 6bis:
+* Unit tests in `dtn-hdy-ham/src/security/keystore.rs` covering:
+  * Deterministic tier hierarchy (`dtn://f5kuv/*` beats `dtn://*/very_long_service_name`).
+  * Identity mismatch rejection (`primary.source = dtn://f5kuv/chat` signed by `security_source = dtn://other/chat` $\rightarrow$ `AuthStatus::Invalid`).
+  * Minimum key length rejection ($< 16$ bytes rejected) and disambiguated hex vs. passphrase parsing.
+  * Uniqueness on `(direction, pattern)`.
+  * Unix file mode `0o600` check on `keystore.toml` and redacted `format!("{:?}", key_entry)` check.
+* Integration tests in `dtn-hdy-ham/tests/` verifying `BundleSummary.auth_status` accuracy in `bundle_inspector_test.rs`, `VerifyPolicy::Ignore` short-circuiting, and `bpsec_chat_files_test.rs`.
+* E2E Playwright test `dtn-hdy-ham/web/tests/security.spec.ts` verifying unified `❓` badge on `missing_key` and `unsigned`.
+* Zero warnings on `cargo clippy --workspace --all-targets` and `cargo fmt --check`.
 
 ---
 

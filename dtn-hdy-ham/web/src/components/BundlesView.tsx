@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { renderMarkdown } from '../utils/markdown';
+import { SecurityBadge } from './SecurityBadge';
 
 export interface BundleSummary {
   id: string;
@@ -11,6 +12,7 @@ export interface BundleSummary {
   lifetime_secs: number;
   size: number;
   status: string;
+  auth_status?: string;
 }
 
 export interface BundleDetail extends BundleSummary {
@@ -310,6 +312,7 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
               <thead class="bg-slate-50 dark:bg-slate-900/50 text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
                 <tr>
                   <th class="px-3 py-3.5 whitespace-nowrap">Status</th>
+                  <th class="px-3 py-3.5 whitespace-nowrap">Auth</th>
                   <th class="px-3 py-3.5 whitespace-nowrap">Bundle ID</th>
                   <th class="px-3 py-3.5">Source</th>
                   <th class="px-3 py-3.5">Destination</th>
@@ -333,6 +336,9 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                       >
                         {b.status}
                       </span>
+                    </td>
+                    <td class="px-3 py-3 whitespace-nowrap">
+                      <SecurityBadge status={b.auth_status} showLabel={false} />
                     </td>
                     <td class="px-3 py-3 font-mono text-xs text-slate-900 dark:text-slate-200 whitespace-nowrap">
                       <div class="inline-flex items-center space-x-1.5" title={b.id}>
@@ -496,6 +502,10 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                     <div class="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
                       <span class="text-slate-500 dark:text-slate-400 font-medium">Created:</span>
                       <span class="text-slate-900 dark:text-slate-200">{bundleDetail.created_at}</span>
+                    </div>
+                    <div class="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
+                      <span class="text-slate-500 dark:text-slate-400 font-medium">BPSec BIB (RFC 9103):</span>
+                      <SecurityBadge status={bundleDetail.auth_status} showLabel={true} />
                     </div>
                     <div class="flex justify-between py-1 border-b border-slate-200/60 dark:border-slate-800">
                       <span class="text-slate-500 dark:text-slate-400 font-medium">Lifetime:</span>

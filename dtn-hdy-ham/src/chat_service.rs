@@ -15,6 +15,7 @@ use tokio::sync::OnceCell;
 use tracing::{debug, info, warn};
 
 use crate::chat_manager::{ChatManager, ChatMessage, normalize_chat_target};
+use crate::security::{AuthStatus, DirectionalKeyStore, VerifyPolicy, verify_parsed_bundle};
 use crate::service_tracker::ServiceTracker;
 
 /// Permanent DTN BPv7 service for text messaging and chat conversations.
@@ -22,15 +23,21 @@ use crate::service_tracker::ServiceTracker;
 pub struct ChatService {
     chat_manager: ChatManager,
     service_tracker: ServiceTracker,
+    keystore: Arc<DirectionalKeyStore>,
     sink: Arc<OnceCell<Box<dyn ServiceSink>>>,
 }
 
 impl ChatService {
-    /// Creates a new Chat service bound to a chat storage manager and service tracker.
-    pub fn new(chat_manager: ChatManager, service_tracker: ServiceTracker) -> Self {
+    /// Creates a new Chat service bound to a chat storage manager, service tracker and keystore.
+    pub fn new(
+        chat_manager: ChatManager,
+        service_tracker: ServiceTracker,
+        keystore: Arc<DirectionalKeyStore>,
+    ) -> Self {
         Self {
             chat_manager,
             service_tracker,
+            keystore,
             sink: Arc::new(OnceCell::new()),
         }
     }
@@ -40,6 +47,15 @@ impl ChatService {
             debug!("ChatService: failed to parse delivered bundle");
             return Ok(());
         };
+
+        let auth_status = verify_parsed_bundle(&parsed, &self.keystore);
+        let policy = self.keystore.get_policy();
+        if policy == VerifyPolicy::Strict && auth_status == AuthStatus::Invalid {
+            warn!(
+                "ChatService: dropping delivered bundle due to strict policy and invalid signature"
+            );
+            return Ok(());
+        }
 
         let bundle = &parsed.bundle;
         let source_eid = &bundle.primary.id.source;
@@ -93,6 +109,7 @@ impl ChatService {
             timestamp: creation_time_ms,
             expiry_timestamp,
             created_at,
+            auth_status: auth_status.as_str().to_string(),
         };
 
         if let Err(e) = self.chat_manager.insert_message(&msg) {

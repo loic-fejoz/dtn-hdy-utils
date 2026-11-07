@@ -43,6 +43,13 @@ pub struct ChatMessage {
     pub expiry_timestamp: i64,
     /// RFC 3339 formatted creation date string
     pub created_at: String,
+    /// Cryptographic authentication status: "valid" | "invalid" | "missing_key" | "unsigned"
+    #[serde(default = "default_auth_status")]
+    pub auth_status: String,
+}
+
+fn default_auth_status() -> String {
+    "unsigned".to_string()
 }
 
 /// Conversation summary item for conversations list.
@@ -97,6 +104,9 @@ pub struct FileBundleRecord {
     pub is_read: bool,
     /// RFC 3339 formatted creation date
     pub created_at: String,
+    /// Cryptographic authentication status: "valid" | "invalid" | "missing_key" | "unsigned"
+    #[serde(default = "default_auth_status")]
+    pub auth_status: String,
 }
 
 /// Normalizes any peer string into canonical node EID.
@@ -468,7 +478,8 @@ impl InternalStorage {
                 is_sticky INTEGER NOT NULL DEFAULT 0,
                 timestamp INTEGER NOT NULL,
                 expiry_timestamp INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                auth_status TEXT NOT NULL DEFAULT 'unsigned'
             );
 
             CREATE INDEX IF NOT EXISTS idx_chat_peer ON chat_messages(conversation_peer, timestamp);
@@ -489,7 +500,8 @@ impl InternalStorage {
                 mime_type TEXT NOT NULL,
                 is_sticky INTEGER NOT NULL DEFAULT 0,
                 is_read INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                auth_status TEXT NOT NULL DEFAULT 'unsigned'
             );
 
             CREATE INDEX IF NOT EXISTS idx_files_created ON files_bundles(creation_timestamp DESC);
@@ -522,6 +534,33 @@ impl InternalStorage {
                 "#,
             )?;
         }
+
+        if user_version < 2 {
+            // Check if column already exists before adding
+            let has_chat_auth: bool = conn
+                .prepare("PRAGMA table_info(chat_messages)")?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .any(|col| col.map(|c| c == "auth_status").unwrap_or(false));
+            if !has_chat_auth {
+                conn.execute(
+                    "ALTER TABLE chat_messages ADD COLUMN auth_status TEXT NOT NULL DEFAULT 'unsigned'",
+                    [],
+                )?;
+            }
+
+            let has_files_auth: bool = conn
+                .prepare("PRAGMA table_info(files_bundles)")?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .any(|col| col.map(|c| c == "auth_status").unwrap_or(false));
+            if !has_files_auth {
+                conn.execute(
+                    "ALTER TABLE files_bundles ADD COLUMN auth_status TEXT NOT NULL DEFAULT 'unsigned'",
+                    [],
+                )?;
+            }
+
+            conn.execute_batch("PRAGMA user_version = 2;")?;
+        }
         Ok(())
     }
 
@@ -549,8 +588,8 @@ impl InternalStorage {
             r#"
             INSERT OR REPLACE INTO chat_messages (
                 id, conversation_peer, sender_eid, recipient_eid, content,
-                direction, status, is_read, is_sticky, timestamp, expiry_timestamp, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                direction, status, is_read, is_sticky, timestamp, expiry_timestamp, created_at, auth_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 msg.id,
@@ -565,6 +604,7 @@ impl InternalStorage {
                 msg.timestamp,
                 msg.expiry_timestamp,
                 msg.created_at,
+                msg.auth_status,
             ],
         )?;
         Ok(())
@@ -735,7 +775,7 @@ impl InternalStorage {
         let mut stmt = conn.prepare(
             r#"
             SELECT id, conversation_peer, sender_eid, recipient_eid, content,
-                   direction, status, is_read, is_sticky, timestamp, expiry_timestamp, created_at
+                   direction, status, is_read, is_sticky, timestamp, expiry_timestamp, created_at, auth_status
             FROM chat_messages
             WHERE conversation_peer = ?1
             ORDER BY timestamp ASC
@@ -756,6 +796,9 @@ impl InternalStorage {
                 timestamp: row.get(9)?,
                 expiry_timestamp: row.get(10)?,
                 created_at: row.get(11)?,
+                auth_status: row
+                    .get::<_, Option<String>>(12)?
+                    .unwrap_or_else(default_auth_status),
             })
         })?;
 
@@ -829,8 +872,8 @@ impl InternalStorage {
             r#"
             INSERT OR REPLACE INTO files_bundles (
                 id, source_eid, destination_eid, creation_timestamp, lifetime_secs,
-                expiry_timestamp, size, payload_path, mime_type, is_sticky, is_read, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                expiry_timestamp, size, payload_path, mime_type, is_sticky, is_read, created_at, auth_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 bundle.id,
@@ -845,6 +888,7 @@ impl InternalStorage {
                 if bundle.is_sticky { 1 } else { 0 },
                 if bundle.is_read { 1 } else { 0 },
                 bundle.created_at,
+                bundle.auth_status,
             ],
         )?;
         Ok(())
@@ -859,7 +903,7 @@ impl InternalStorage {
         let mut stmt = conn.prepare(
             r#"
             SELECT id, source_eid, destination_eid, creation_timestamp, lifetime_secs,
-                   expiry_timestamp, size, payload_path, mime_type, is_sticky, is_read, created_at
+                   expiry_timestamp, size, payload_path, mime_type, is_sticky, is_read, created_at, auth_status
             FROM files_bundles
             ORDER BY creation_timestamp DESC
             "#,
@@ -879,6 +923,9 @@ impl InternalStorage {
                 is_sticky: row.get::<_, i64>(9)? != 0,
                 is_read: row.get::<_, i64>(10)? != 0,
                 created_at: row.get(11)?,
+                auth_status: row
+                    .get::<_, Option<String>>(12)?
+                    .unwrap_or_else(default_auth_status),
             })
         })?;
 
@@ -898,7 +945,7 @@ impl InternalStorage {
         let mut stmt = conn.prepare(
             r#"
             SELECT id, source_eid, destination_eid, creation_timestamp, lifetime_secs,
-                   expiry_timestamp, size, payload_path, mime_type, is_sticky, is_read, created_at
+                   expiry_timestamp, size, payload_path, mime_type, is_sticky, is_read, created_at, auth_status
             FROM files_bundles
             WHERE id = ?1
             "#,
@@ -918,6 +965,9 @@ impl InternalStorage {
                 is_sticky: row.get::<_, i64>(9)? != 0,
                 is_read: row.get::<_, i64>(10)? != 0,
                 created_at: row.get(11)?,
+                auth_status: row
+                    .get::<_, Option<String>>(12)?
+                    .unwrap_or_else(default_auth_status),
             })
         })?;
 
@@ -1178,6 +1228,7 @@ mod tests {
             is_sticky: false,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         storage.insert_file_bundle(&record).unwrap();
@@ -1222,6 +1273,7 @@ mod tests {
             is_sticky: false,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         // Expired but STICKY bundle (must NOT be deleted)
@@ -1238,6 +1290,7 @@ mod tests {
             is_sticky: true,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         // Future non-sticky bundle (expiry = 50000)
@@ -1254,6 +1307,7 @@ mod tests {
             is_sticky: false,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         storage.insert_file_bundle(&f1).unwrap();
@@ -1299,6 +1353,7 @@ mod tests {
             is_sticky: false,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_file_bundle(&rec).unwrap();
         // Deletion must succeed even if physical file is missing
@@ -1330,6 +1385,7 @@ mod tests {
             timestamp: dtn_ts,
             expiry_timestamp: dtn_expiry,
             created_at: "2026-11-05T07:25:44Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         storage.insert_chat_message(&legacy_msg).unwrap();
@@ -1393,6 +1449,7 @@ mod tests {
             timestamp: now_ms,
             expiry_timestamp: old_24h_expiry,
             created_at: "2026-11-05T08:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         // Sticky message should NOT be modified even if > 3600s
@@ -1409,6 +1466,7 @@ mod tests {
             timestamp: now_ms,
             expiry_timestamp: old_24h_expiry,
             created_at: "2026-11-05T08:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
 
         storage.insert_chat_message(&outbound_msg).unwrap();
@@ -1460,6 +1518,7 @@ mod tests {
             timestamp: now_ms,
             expiry_timestamp: now_ms + (week_secs * 1000),
             created_at: "2026-11-05T08:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_chat_message(&week_msg).unwrap();
 
@@ -1503,6 +1562,7 @@ mod tests {
             timestamp: now_ms,
             expiry_timestamp: now_ms + 10000,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_chat_message(&c_stk).unwrap();
 
@@ -1521,6 +1581,7 @@ mod tests {
             is_sticky: true,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_file_bundle(&f_stk).unwrap();
 
@@ -1538,6 +1599,7 @@ mod tests {
             timestamp: 100,
             expiry_timestamp: now_ms - 1000, // expired!
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_chat_message(&c_exp).unwrap();
 
@@ -1557,6 +1619,7 @@ mod tests {
             is_sticky: false,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_file_bundle(&f_exp).unwrap();
 
@@ -1574,6 +1637,7 @@ mod tests {
             timestamp: 300,
             expiry_timestamp: now_ms + 100000, // valid/active
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_chat_message(&c_act).unwrap();
 
@@ -1593,6 +1657,7 @@ mod tests {
             is_sticky: false,
             is_read: false,
             created_at: "2026-11-05T00:00:00Z".to_string(),
+            auth_status: "unsigned".to_string(),
         };
         storage.insert_file_bundle(&f_act).unwrap();
 

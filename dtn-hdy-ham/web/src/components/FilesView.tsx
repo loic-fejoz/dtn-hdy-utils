@@ -1,6 +1,7 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { renderMarkdown } from '../utils/markdown';
+import { SecurityBadge } from './SecurityBadge';
 
 export interface FileBundleRecord {
   id: string;
@@ -15,6 +16,7 @@ export interface FileBundleRecord {
   is_sticky: boolean;
   is_read: boolean;
   created_at: string;
+  auth_status?: string;
 }
 
 export interface FileDetailResponse {
@@ -368,6 +370,11 @@ export function FilesView({
                   </span>
                 </span>
               </div>
+
+              <div>
+                <span class="text-slate-400 block mb-0.5 font-medium">Authentification BPSec</span>
+                <SecurityBadge status={detailData.bundle.auth_status} showLabel={true} />
+              </div>
             </div>
           </div>
 
@@ -532,6 +539,8 @@ export function FilesView({
                         <span class="font-bold text-sm text-slate-900 dark:text-white font-mono truncate">
                           {b.source_eid}
                         </span>
+
+                        <SecurityBadge status={b.auth_status} showLabel={false} />
 
                         {!b.is_read && (
                           <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300">

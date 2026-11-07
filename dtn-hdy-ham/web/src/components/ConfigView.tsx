@@ -21,6 +21,17 @@ export interface PeerStatusInfo {
   last_attempt_at: string | null;
 }
 
+export interface KeyInfo {
+  id: string;
+  direction: 'outbound' | 'inbound';
+  pattern: string;
+  label?: string | null;
+  fingerprint: string;
+  created_at: string;
+}
+
+export type VerifyPolicy = 'warn' | 'strict' | 'ignore';
+
 export interface StationConfig {
   status: string;
   version: string;
@@ -80,6 +91,163 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
   // Peer Connection Statuses state
   const [peerStatuses, setPeerStatuses] = useState<Record<string, PeerStatusInfo>>({});
 
+  // BPSec Security & Keystore state
+  const [securityPolicy, setSecurityPolicy] = useState<VerifyPolicy>('warn');
+  const [keys, setKeys] = useState<KeyInfo[]>([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [showAddKeyModal, setShowAddKeyModal] = useState(false);
+  const [newKeyDirection, setNewKeyDirection] = useState<'outbound' | 'inbound'>('outbound');
+  const [newKeyPattern, setNewKeyPattern] = useState('');
+  const [newKeyLabel, setNewKeyLabel] = useState('');
+  const [newKeySecret, setNewKeySecret] = useState('');
+  const [showSecretText, setShowSecretText] = useState(false);
+  const [keyMessage, setKeyMessage] = useState<{ success: boolean; text: string } | null>(null);
+  const [submittingKey, setSubmittingKey] = useState(false);
+  const [deletingKeyId, setDeletingKeyId] = useState<string | null>(null);
+
+  const fetchSecurityPolicy = async () => {
+    try {
+      const res = await fetch('/api/v1/security/policy');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.policy) {
+          setSecurityPolicy(data.policy);
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const fetchKeys = async () => {
+    try {
+      setKeysLoading(true);
+      const res = await fetch('/api/v1/security/keys');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setKeys(data);
+        }
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setKeysLoading(false);
+    }
+  };
+
+  const handleUpdatePolicy = async (newPolicy: VerifyPolicy) => {
+    try {
+      const res = await fetch('/api/v1/security/policy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ policy: newPolicy }),
+      });
+      if (res.ok) {
+        setSecurityPolicy(newPolicy);
+        setKeyMessage({
+          success: true,
+          text: `Politique de vérification mise à jour en mode "${newPolicy.toUpperCase()}".`,
+        });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setKeyMessage({
+          success: false,
+          text: err.error || 'Échec de mise à jour de la politique.',
+        });
+      }
+    } catch (e: any) {
+      setKeyMessage({ success: false, text: e.message || 'Erreur réseau.' });
+    }
+  };
+
+  const handleAddKey = async (e: Event) => {
+    e.preventDefault();
+    if (!newKeyPattern.trim() || !newKeySecret.trim()) {
+      setKeyMessage({
+        success: false,
+        text: 'Le motif EID et la clé secrète sont obligatoires.',
+      });
+      return;
+    }
+
+    try {
+      setSubmittingKey(true);
+      setKeyMessage(null);
+      const res = await fetch('/api/v1/security/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          direction: newKeyDirection,
+          pattern: newKeyPattern.trim(),
+          label: newKeyLabel.trim() || null,
+          secret: newKeySecret.trim(),
+        }),
+      });
+
+      if (res.ok) {
+        const created: KeyInfo = await res.json();
+        setKeys((prev) => [...prev, created]);
+        setNewKeyPattern('');
+        setNewKeyLabel('');
+        setNewKeySecret('');
+        setShowAddKeyModal(false);
+        setKeyMessage({
+          success: true,
+          text: `Clé ${created.direction.toUpperCase()} pour "${created.pattern}" enregistrée avec succès.`,
+        });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setKeyMessage({
+          success: false,
+          text: err.error || "Échec lors de l'enregistrement de la clé.",
+        });
+      }
+    } catch (e: any) {
+      setKeyMessage({ success: false, text: e.message || 'Erreur réseau.' });
+    } finally {
+      setSubmittingKey(false);
+    }
+  };
+
+  const handleDeleteKey = async (id: string, pattern: string) => {
+    if (!confirm(`Supprimer la clé de sécurité pour "${pattern}" ?`)) return;
+
+    try {
+      setDeletingKeyId(id);
+      setKeyMessage(null);
+      const res = await fetch(`/api/v1/security/keys/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setKeys((prev) => prev.filter((k) => k.id !== id));
+        setKeyMessage({
+          success: true,
+          text: `Clé pour "${pattern}" supprimée.`,
+        });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setKeyMessage({
+          success: false,
+          text: err.error || 'Échec lors de la suppression de la clé.',
+        });
+      }
+    } catch (e: any) {
+      setKeyMessage({ success: false, text: e.message || 'Erreur réseau.' });
+    } finally {
+      setDeletingKeyId(null);
+    }
+  };
+
+  const generateRandomSecret = () => {
+    const bytes = new Uint8Array(32);
+    window.crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    setNewKeySecret(hex);
+  };
+
   const fetchRoutes = async () => {
     try {
       setRoutesLoading(true);
@@ -116,6 +284,8 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
   useEffect(() => {
     fetchRoutes();
     fetchPeerStatuses();
+    fetchSecurityPolicy();
+    fetchKeys();
 
     const interval = setInterval(fetchPeerStatuses, 5000);
     return () => clearInterval(interval);
@@ -766,6 +936,349 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
             </table>
           </div>
         )}
+      </div>
+
+      {/* =========================================================================
+          SECTION: BPSEC AUTHENTICATION & KEYSTORE (RFC 9103 / RFC 9172)
+          ========================================================================= */}
+      <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-700">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-700 gap-3">
+          <div class="flex items-center space-x-2">
+            <span class="text-xl">🛡️</span>
+            <div>
+              <h3 class="text-base font-bold text-slate-900 dark:text-white">
+                Sécurité & Authentification BPSec (RFC 9103 / RFC 9172)
+              </h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400">
+                Gestion des clés HMAC-SHA256 pour signature automatique et vérification d'intégrité (sans chiffrement).
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+              {keys.length} clé{keys.length > 1 ? 's' : ''}
+            </span>
+            <button
+              onClick={() => {
+                setShowAddKeyModal(!showAddKeyModal);
+                setKeyMessage(null);
+              }}
+              class="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1 cursor-pointer"
+            >
+              <span>{showAddKeyModal ? '✕ Fermer' : '+ Ajouter une clé'}</span>
+            </button>
+          </div>
+        </div>
+
+        {keyMessage && (
+          <div
+            class={`my-4 p-3 rounded-xl text-xs font-medium border flex items-center justify-between ${
+              keyMessage.success
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : 'bg-red-50 dark:bg-red-950/60 border-red-300 dark:border-red-800 text-red-800 dark:text-red-300'
+            }`}
+          >
+            <span>{keyMessage.success ? '✓' : '⚠️'} {keyMessage.text}</span>
+            <button
+              onClick={() => setKeyMessage(null)}
+              class="text-xs hover:underline ml-2 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Policy Selector & Info Callout */}
+        <div class="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+          <div class="md:col-span-2">
+            <label class="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
+              Politique de vérification à l'ingestion
+            </label>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400">
+              Contrôle l'acceptation ou le rejet des paquets entrants lors d'une altération ou signature invalide.
+            </p>
+          </div>
+          <div>
+            <select
+              value={securityPolicy}
+              onChange={(e: any) => handleUpdatePolicy(e.target.value)}
+              class="w-full text-xs font-semibold px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="warn">Avertissement (Warn) — Recommandé</option>
+              <option value="strict">Strict (Rejeter signatures invalides)</option>
+              <option value="ignore">Ignorer la vérification (Ignore)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Add Key Form Modal / Drawer */}
+        {showAddKeyModal && (
+          <form
+            onSubmit={handleAddKey}
+            class="my-4 p-4 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/30 space-y-4"
+          >
+            <div class="flex items-center justify-between">
+              <span class="font-semibold text-xs text-emerald-800 dark:text-emerald-300">
+                Configuration d'une nouvelle clé BPSec BIB
+              </span>
+              <span class="text-[10px] text-slate-500 dark:text-slate-400">
+                Fichier local protégé (POSIX 0600) — Secrets jamais renvoyés par l'API
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Direction */}
+              <div>
+                <label class="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Direction de la clé *
+                </label>
+                <div class="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewKeyDirection('outbound')}
+                    class={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium border cursor-pointer transition ${
+                      newKeyDirection === 'outbound'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    📤 Sortante (Destination)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewKeyDirection('inbound')}
+                    class={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium border cursor-pointer transition ${
+                      newKeyDirection === 'inbound'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    📥 Entrante (Émetteur)
+                  </button>
+                </div>
+                <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                  {newKeyDirection === 'outbound'
+                    ? 'Utilisée pour signer les bundles envoyés vers les nœuds correspondant au motif.'
+                    : 'Utilisée pour vérifier les bundles reçus depuis les émetteurs correspondant au motif.'}
+                </p>
+              </div>
+
+              {/* Label */}
+              <div>
+                <label class="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Libellé / Station (optionnel)
+                </label>
+                <input
+                  type="text"
+                  placeholder="ex: Station F5KUV ou Club Relais"
+                  value={newKeyLabel}
+                  onInput={(e: any) => setNewKeyLabel(e.target.value)}
+                  class="w-full text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            {/* Pattern input and presets */}
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                  Motif d'EID (Pattern) *
+                </label>
+                <div class="flex items-center space-x-1">
+                  <span class="text-[10px] text-slate-400">Exemples :</span>
+                  {['dtn://*', 'dtn://f5kuv/*', 'dtn://*/chat', 'ipn:0.1.*'].map((pat) => (
+                    <button
+                      type="button"
+                      onClick={() => setNewKeyPattern(pat)}
+                      class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 hover:bg-emerald-100 dark:hover:bg-emerald-900 text-slate-700 dark:text-slate-300 cursor-pointer"
+                    >
+                      {pat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <input
+                type="text"
+                placeholder="ex: dtn://f5kuv/* ou dtn://*/chat ou dtn://*"
+                value={newKeyPattern}
+                onInput={(e: any) => setNewKeyPattern(e.target.value)}
+                required
+                class="w-full font-mono text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            {/* Secret key input and generator */}
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                  Clé Secrète HMAC-SHA256 (Passphrase ou Hex 256 bits) *
+                </label>
+                <div class="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={generateRandomSecret}
+                    class="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                  >
+                    🎲 Générer aléatoire (256-bit Hex)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSecretText(!showSecretText)}
+                    class="text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+                  >
+                    {showSecretText ? 'Masquer' : 'Afficher'}
+                  </button>
+                </div>
+              </div>
+              <input
+                type={showSecretText ? 'text' : 'password'}
+                placeholder="Entrez une phrase secrète partagée ou une clé hexadécimale (64 caractères)"
+                value={newKeySecret}
+                onInput={(e: any) => setNewKeySecret(e.target.value)}
+                required
+                class="w-full font-mono text-xs px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div class="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAddKeyModal(false)}
+                class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                disabled={submittingKey}
+                class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer disabled:opacity-50"
+              >
+                {submittingKey ? 'Enregistrement...' : 'Enregistrer la clé'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Tables: Outbound & Inbound Keys */}
+        <div class="mt-6 space-y-6">
+          {/* Outbound Keys Table */}
+          <div>
+            <div class="flex items-center space-x-2 mb-2">
+              <span class="text-sm">📤</span>
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Clés sortantes (Signature automatique selon le destinataire)
+              </h4>
+            </div>
+
+            {keys.filter((k) => k.direction === 'outbound').length === 0 ? (
+              <p class="text-xs text-slate-400 italic bg-slate-50 dark:bg-slate-900/30 p-3 rounded-lg">
+                Aucune clé sortante configurée. Les paquets émis ne seront pas signés BPSec.
+              </p>
+            ) : (
+              <div class="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                <table class="w-full text-left text-xs font-mono divide-y divide-slate-100 dark:divide-slate-700">
+                  <thead class="bg-slate-50 dark:bg-slate-900/50 text-slate-500">
+                    <tr>
+                      <th class="py-2 px-3">Motif Destination</th>
+                      <th class="py-2 px-3">Libellé</th>
+                      <th class="py-2 px-3">Empreinte SHA-256</th>
+                      <th class="py-2 px-3">Créée le</th>
+                      <th class="py-2 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                    {keys
+                      .filter((k) => k.direction === 'outbound')
+                      .map((k) => (
+                        <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
+                          <td class="py-2.5 px-3 font-semibold text-emerald-600 dark:text-emerald-400">
+                            {k.pattern}
+                          </td>
+                          <td class="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                            {k.label || '—'}
+                          </td>
+                          <td class="py-2.5 px-3 text-slate-500 dark:text-slate-400 text-[11px]">
+                            {k.fingerprint}
+                          </td>
+                          <td class="py-2.5 px-3 text-slate-400 text-[11px]">
+                            {k.created_at ? k.created_at.substring(0, 10) : '—'}
+                          </td>
+                          <td class="py-2.5 px-3 text-right">
+                            <button
+                              onClick={() => handleDeleteKey(k.id, k.pattern)}
+                              disabled={deletingKeyId === k.id}
+                              class="px-2 py-1 text-[11px] font-semibold rounded bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 transition cursor-pointer disabled:opacity-50"
+                            >
+                              {deletingKeyId === k.id ? '...' : '🗑️ Supprimer'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Inbound Keys Table */}
+          <div>
+            <div class="flex items-center space-x-2 mb-2">
+              <span class="text-sm">📥</span>
+              <h4 class="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Clés entrantes (Vérification cryptographique selon l'émetteur)
+              </h4>
+            </div>
+
+            {keys.filter((k) => k.direction === 'inbound').length === 0 ? (
+              <p class="text-xs text-slate-400 italic bg-slate-50 dark:bg-slate-900/30 p-3 rounded-lg">
+                Aucune clé entrante configurée. Les paquets reçus porteront l'état "Non signé" ou "Clé manquante".
+              </p>
+            ) : (
+              <div class="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                <table class="w-full text-left text-xs font-mono divide-y divide-slate-100 dark:divide-slate-700">
+                  <thead class="bg-slate-50 dark:bg-slate-900/50 text-slate-500">
+                    <tr>
+                      <th class="py-2 px-3">Motif Émetteur</th>
+                      <th class="py-2 px-3">Libellé</th>
+                      <th class="py-2 px-3">Empreinte SHA-256</th>
+                      <th class="py-2 px-3">Créée le</th>
+                      <th class="py-2 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                    {keys
+                      .filter((k) => k.direction === 'inbound')
+                      .map((k) => (
+                        <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
+                          <td class="py-2.5 px-3 font-semibold text-blue-600 dark:text-blue-400">
+                            {k.pattern}
+                          </td>
+                          <td class="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                            {k.label || '—'}
+                          </td>
+                          <td class="py-2.5 px-3 text-slate-500 dark:text-slate-400 text-[11px]">
+                            {k.fingerprint}
+                          </td>
+                          <td class="py-2.5 px-3 text-slate-400 text-[11px]">
+                            {k.created_at ? k.created_at.substring(0, 10) : '—'}
+                          </td>
+                          <td class="py-2.5 px-3 text-right">
+                            <button
+                              onClick={() => handleDeleteKey(k.id, k.pattern)}
+                              disabled={deletingKeyId === k.id}
+                              class="px-2 py-1 text-[11px] font-semibold rounded bg-red-50 dark:bg-red-950/60 hover:bg-red-100 dark:hover:bg-red-900/80 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 transition cursor-pointer disabled:opacity-50"
+                            >
+                              {deletingKeyId === k.id ? '...' : '🗑️ Supprimer'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

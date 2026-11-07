@@ -17,6 +17,7 @@ use tokio::sync::OnceCell;
 use tracing::{debug, error, info, warn};
 
 use crate::internal_storage::{FileBundleRecord, InternalStorage};
+use crate::security::{AuthStatus, DirectionalKeyStore, VerifyPolicy, verify_parsed_bundle};
 use crate::service_tracker::ServiceTracker;
 
 /// Permanent DTN BPv7 service for file transfers and bundle inspection (`BUNDLE_LIST`).
@@ -24,15 +25,21 @@ use crate::service_tracker::ServiceTracker;
 pub struct FilesService {
     storage: InternalStorage,
     service_tracker: ServiceTracker,
+    keystore: Arc<DirectionalKeyStore>,
     sink: Arc<OnceCell<Box<dyn ServiceSink>>>,
 }
 
 impl FilesService {
-    /// Creates a new `FilesService` bound to station internal storage and service tracker.
-    pub fn new(storage: InternalStorage, service_tracker: ServiceTracker) -> Self {
+    /// Creates a new `FilesService` bound to station internal storage, service tracker and keystore.
+    pub fn new(
+        storage: InternalStorage,
+        service_tracker: ServiceTracker,
+        keystore: Arc<DirectionalKeyStore>,
+    ) -> Self {
         Self {
             storage,
             service_tracker,
+            keystore,
             sink: Arc::new(OnceCell::new()),
         }
     }
@@ -43,6 +50,15 @@ impl FilesService {
             debug!("FilesService: failed to parse delivered bundle");
             return Ok(());
         };
+
+        let auth_status = verify_parsed_bundle(&parsed, &self.keystore);
+        let policy = self.keystore.get_policy();
+        if policy == VerifyPolicy::Strict && auth_status == AuthStatus::Invalid {
+            warn!(
+                "FilesService: dropping delivered bundle due to strict policy and invalid signature"
+            );
+            return Ok(());
+        }
 
         let bundle = &parsed.bundle;
         let source_eid = &bundle.primary.id.source;
@@ -147,6 +163,7 @@ impl FilesService {
             is_sticky: false,
             is_read: false,
             created_at,
+            auth_status: auth_status.as_str().to_string(),
         };
 
         if let Err(e) = self.storage.insert_file_bundle(&record) {

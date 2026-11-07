@@ -45,6 +45,12 @@ pub struct BundleSummary {
     pub lifetime_secs: u64,
     pub size: usize,
     pub status: String,
+    #[serde(default = "default_auth_status")]
+    pub auth_status: String,
+}
+
+fn default_auth_status() -> String {
+    "unsigned".to_string()
 }
 
 /// Detailed metadata of a stored BPv7 bundle including payload preview.
@@ -64,6 +70,8 @@ pub struct BundleDetail {
     pub storage_name: Option<String>,
     pub payload_preview: Option<String>,
     pub hex_dump: Option<String>,
+    #[serde(default = "default_auth_status")]
+    pub auth_status: String,
 }
 
 /// Infers the MIME type and whether a payload is binary or textual.
@@ -179,7 +187,11 @@ pub fn format_hex_dump(data: &[u8]) -> String {
 }
 
 /// Lists all stored bundles from the SQLite metadata database.
-pub fn list_bundles_from_db(db_path: &Path) -> anyhow::Result<Vec<BundleSummary>> {
+pub fn list_bundles_from_db(
+    db_path: &Path,
+    payload_dir: Option<&Path>,
+    keystore: Option<&crate::security::DirectionalKeyStore>,
+) -> anyhow::Result<Vec<BundleSummary>> {
     if !db_path.exists() {
         return Ok(Vec::new());
     }
@@ -210,7 +222,7 @@ pub fn list_bundles_from_db(db_path: &Path) -> anyhow::Result<Vec<BundleSummary>
             Err(_) => continue,
         };
 
-        let (dest, lifetime_secs, size, status) = if let Some(bytes) = bundle_bytes {
+        let (dest, lifetime_secs, size, status, auth_status) = if let Some(bytes) = bundle_bytes {
             let bundle_json: serde_json::Value = match serde_json::from_slice(&bytes) {
                 Ok(j) => j,
                 Err(_) => continue,
@@ -246,9 +258,64 @@ pub fn list_bundles_from_db(db_path: &Path) -> anyhow::Result<Vec<BundleSummary>
                 _ => "Stored",
             };
 
-            (dest, lifetime_secs, size, status.to_string())
+            let has_bib = bundle_json["bpv7"]["blocks"]
+                .as_object()
+                .map(|blocks| {
+                    blocks.values().any(|b| {
+                        b["block_type"].as_u64() == Some(11)
+                            || b["type"].as_str() == Some("BlockIntegrity")
+                    })
+                })
+                .unwrap_or(false);
+
+            let auth_status = if !has_bib {
+                "unsigned".to_string()
+            } else if let Some(ks) = keystore {
+                if ks.get_policy() == crate::security::VerifyPolicy::Ignore {
+                    "unsigned".to_string()
+                } else {
+                    let storage_name = bundle_json["metadata"]["storage_name"]
+                        .as_str()
+                        .map(|s| s.to_string());
+                    let verified = if let (Some(name), Some(dir)) = (storage_name, payload_dir) {
+                        if let Ok(path) = safe_payload_path(dir, &name) {
+                            if let Ok(raw_bytes) = std::fs::read(&path) {
+                                Some(crate::security::verify_bundle(&raw_bytes, ks))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    match verified {
+                        Some(status) => status.as_str().to_string(),
+                        None => {
+                            let src = bpv7_id.source.to_string();
+                            if ks.find_inbound_key(&src).is_none() {
+                                "missing_key".to_string()
+                            } else {
+                                "valid".to_string()
+                            }
+                        }
+                    }
+                }
+            } else {
+                "unsigned".to_string()
+            };
+
+            (dest, lifetime_secs, size, status.to_string(), auth_status)
         } else {
-            ("-".to_string(), 3600, 0, "Completed".to_string())
+            (
+                "-".to_string(),
+                3600,
+                0,
+                "Completed".to_string(),
+                "unsigned".to_string(),
+            )
         };
 
         let created_at = bpv7_id
@@ -274,6 +341,7 @@ pub fn list_bundles_from_db(db_path: &Path) -> anyhow::Result<Vec<BundleSummary>
             lifetime_secs,
             size,
             status,
+            auth_status,
         });
     }
 
@@ -372,12 +440,13 @@ pub async fn get_bundle_detail(
     db_path: &Path,
     payload_dir: &Path,
     bundle_key: &str,
+    keystore: Option<&crate::security::DirectionalKeyStore>,
 ) -> anyhow::Result<Option<BundleDetail>> {
     if !db_path.exists() {
         return Ok(None);
     }
 
-    let summaries = list_bundles_from_db(db_path)?;
+    let summaries = list_bundles_from_db(db_path, Some(payload_dir), keystore)?;
     let Some(summary) = summaries.into_iter().find(|s| s.id == bundle_key) else {
         return Ok(None);
     };
@@ -433,6 +502,7 @@ pub async fn get_bundle_detail(
         storage_name,
         payload_preview,
         hex_dump,
+        auth_status: summary.auth_status,
     }))
 }
 

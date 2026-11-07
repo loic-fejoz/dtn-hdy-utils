@@ -9,7 +9,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderValue, Method, header};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
@@ -28,6 +28,7 @@ pub struct AppState {
     pub internal_storage: crate::internal_storage::InternalStorage,
     pub route_manager: Arc<crate::routing::RouteManager>,
     pub log_buffer: Arc<crate::log_buffer::LogBuffer>,
+    pub keystore: Arc<crate::security::DirectionalKeyStore>,
 }
 
 /// Builds the Axum router with API endpoints and SPA static asset fallback.
@@ -119,7 +120,16 @@ pub fn create_router(state: AppState) -> Router {
             post(routes::files::toggle_file_sticky),
         )
         .route("/files/{id}/read", post(routes::files::mark_file_read))
-        .route("/files/unread", get(routes::files::get_unread_count));
+        .route("/files/unread", get(routes::files::get_unread_count))
+        .route(
+            "/security/policy",
+            get(routes::security::get_policy).put(routes::security::update_policy),
+        )
+        .route(
+            "/security/keys",
+            get(routes::security::list_keys).post(routes::security::add_key),
+        )
+        .route("/security/keys/{id}", delete(routes::security::delete_key));
 
     if static_dir.exists() {
         info!(

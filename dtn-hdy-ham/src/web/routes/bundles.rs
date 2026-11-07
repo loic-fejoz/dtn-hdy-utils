@@ -137,8 +137,25 @@ async fn build_and_inject_bundle(
             )
         })?;
 
+    let dest_str = destination_eid.to_string();
+    let binbundle_vec = if let Some(key) = state.keystore.find_outbound_key(&dest_str) {
+        tracing::info!(
+            "Signing bundle with BPSec BIB key pattern '{}'",
+            key.pattern
+        );
+        crate::security::sign_bundle_with_key(&bundle, &binbundle, &key, None).map_err(|e| {
+            tracing::error!("BPSec BIB signing failed for destination '{dest_str}': {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to sign bundle with BPSec key: {e}"),
+            )
+        })?
+    } else {
+        binbundle.into_vec()
+    };
+
     let bundle_id = bundle.primary.id.to_key();
-    let bundle_bytes = Bytes::from(binbundle.into_vec());
+    let bundle_bytes = Bytes::from(binbundle_vec);
 
     tracing::info!(
         "Dispatching bundle {} -> {} (id: {}, size: {} bytes, lifetime: {}s)",
@@ -281,7 +298,14 @@ pub async fn list_bundles(
     let payload_dir = state.config.storage.effective_payload_dir();
 
     if let Some(id) = query.id {
-        match crate::bundle_inspector::get_bundle_detail(&db_path, &payload_dir, &id).await {
+        match crate::bundle_inspector::get_bundle_detail(
+            &db_path,
+            &payload_dir,
+            &id,
+            Some(&state.keystore),
+        )
+        .await
+        {
             Ok(Some(detail)) => Json(json!(detail)).into_response(),
             Ok(None) => (
                 StatusCode::NOT_FOUND,
@@ -298,7 +322,11 @@ pub async fn list_bundles(
             }
         }
     } else {
-        match crate::bundle_inspector::list_bundles_from_db(&db_path) {
+        match crate::bundle_inspector::list_bundles_from_db(
+            &db_path,
+            Some(&payload_dir),
+            Some(&state.keystore),
+        ) {
             Ok(bundles) => Json(json!(bundles)).into_response(),
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,

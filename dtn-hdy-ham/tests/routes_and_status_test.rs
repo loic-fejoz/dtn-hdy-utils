@@ -52,6 +52,7 @@ routes:
         internal_storage,
         route_manager: route_manager.clone(),
         log_buffer: dtn_hdy_ham::LogBuffer::global(),
+        keystore: server.keystore(),
     };
     let app = create_router(state);
 
