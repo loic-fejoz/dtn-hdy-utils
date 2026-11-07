@@ -69,6 +69,7 @@ async fn test_files_service_workflow_and_degraded_cases() {
         chat_manager,
         internal_storage: internal_storage.clone(),
         route_manager: server.route_manager(),
+        log_buffer: dtn_hdy_ham::LogBuffer::global(),
     };
     let app = create_router(state);
 
@@ -437,6 +438,7 @@ async fn test_files_payload_range_requests_and_mime_detection() {
         chat_manager: server.chat_manager(),
         internal_storage,
         route_manager: server.route_manager(),
+        log_buffer: dtn_hdy_ham::LogBuffer::global(),
     };
     let app = create_router(app_state);
 

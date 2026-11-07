@@ -122,7 +122,17 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    let log_buffer = dtn_hdy_ham::LogBuffer::init_global(500);
+    let log_layer = dtn_hdy_ham::LogBufferLayer::new(log_buffer);
+
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(log_layer)
+        .init();
 
     if let Some(Commands::GenerateConfig) = cli.command {
         print!("{EXAMPLE_CONFIG}");

@@ -40,6 +40,21 @@ pub enum ServiceEvent {
     BundlesUpdate,
     #[serde(rename = "chat_message")]
     ChatMessage { message: serde_json::Value },
+    #[serde(rename = "file_received")]
+    FileReceived { file: serde_json::Value },
+    #[serde(rename = "cla_state_changed")]
+    ClaStateChanged {
+        name: String,
+        cla_type: String,
+        state: String,
+        details: Option<String>,
+    },
+    #[serde(rename = "contact_window")]
+    ContactWindow {
+        name: String,
+        action: String,
+        cla: String,
+    },
 }
 
 /// Generates an ISO 8601 timestamp with local timezone offset (or UTC fallback).
@@ -141,6 +156,46 @@ impl ServiceTracker {
                 .tx
                 .send(ServiceEvent::ChatMessage { message: val });
         }
+    }
+
+    /// Broadcasts a newly received file event over SSE.
+    pub fn broadcast_file_received(&self, file: impl Serialize) {
+        if let Ok(val) = serde_json::to_value(file) {
+            let _ = self
+                .tracker
+                .tx
+                .send(ServiceEvent::FileReceived { file: val });
+        }
+    }
+
+    /// Broadcasts a CLA state change event (e.g. connected, disconnected) over SSE.
+    pub fn broadcast_cla_state(
+        &self,
+        name: impl Into<String>,
+        cla_type: impl Into<String>,
+        state: impl Into<String>,
+        details: Option<String>,
+    ) {
+        let _ = self.tracker.tx.send(ServiceEvent::ClaStateChanged {
+            name: name.into(),
+            cla_type: cla_type.into(),
+            state: state.into(),
+            details,
+        });
+    }
+
+    /// Broadcasts a scheduled contact window event over SSE.
+    pub fn broadcast_contact_window(
+        &self,
+        name: impl Into<String>,
+        action: impl Into<String>,
+        cla: impl Into<String>,
+    ) {
+        let _ = self.tracker.tx.send(ServiceEvent::ContactWindow {
+            name: name.into(),
+            action: action.into(),
+            cla: cla.into(),
+        });
     }
 
     /// Helper to register a service with a custom type label.

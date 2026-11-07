@@ -6,9 +6,11 @@ import { BundlesView } from './components/BundlesView';
 import { SendBundleView } from './components/SendBundleView';
 import { ChatView, ChatMessage } from './components/ChatView';
 import { FilesView } from './components/FilesView';
+import { LogsView, LogRecord } from './components/LogsView';
+import { playChime } from './utils/audio';
 
 function parseHash(hash: string): {
-  tab: 'config' | 'chat' | 'files' | 'bundles' | 'send';
+  tab: 'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs';
   fileId: string | null;
   destination: string | null;
 } {
@@ -32,13 +34,15 @@ function parseHash(hash: string): {
     return { tab: 'bundles', fileId: null, destination };
   } else if (head === 'send') {
     return { tab: 'send', fileId: null, destination };
+  } else if (head === 'logs') {
+    return { tab: 'logs', fileId: null, destination };
   }
   return { tab: 'config', fileId: null, destination };
 }
 
 export function App() {
   const initialNav = parseHash(window.location.hash);
-  const [activeTab, setActiveTab] = useState<'config' | 'chat' | 'files' | 'bundles' | 'send'>(initialNav.tab);
+  const [activeTab, setActiveTab] = useState<'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs'>(initialNav.tab);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(initialNav.fileId);
   const [sendDestination, setSendDestination] = useState<string | null>(initialNav.destination);
 
@@ -50,6 +54,10 @@ export function App() {
     );
   });
 
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('dtn_sound_notifications') !== 'false';
+  });
+
   const [config, setConfig] = useState<StationConfig | null>(null);
   const [services, setServices] = useState<ActiveService[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +66,9 @@ export function App() {
   const [unreadChatTotal, setUnreadChatTotal] = useState(0);
   const [unreadFilesTotal, setUnreadFilesTotal] = useState(0);
   const [lastChatMessage, setLastChatMessage] = useState<ChatMessage | null>(null);
+
+  const [sseStatus, setSseStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
+  const [incomingLog, setIncomingLog] = useState<LogRecord | null>(null);
 
   // Sync state with browser hash navigation
   useEffect(() => {
@@ -74,7 +85,7 @@ export function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const navigateToTab = (tab: 'config' | 'chat' | 'files' | 'bundles' | 'send') => {
+  const navigateToTab = (tab: 'config' | 'chat' | 'files' | 'bundles' | 'send' | 'logs') => {
     setActiveTab(tab);
     if (tab === 'files') {
       window.location.hash = '#/files';
@@ -98,7 +109,16 @@ export function App() {
     window.location.hash = `#/send?dest=${encodeURIComponent(sourceEid)}`;
   };
 
-  // Sync theme with <html> class
+  const handleToggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    localStorage.setItem('dtn_sound_notifications', next ? 'true' : 'false');
+    if (next) {
+      playChime();
+    }
+  };
+
+  // Dark mode effect
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -109,78 +129,81 @@ export function App() {
     }
   }, [darkMode]);
 
-  // Fetch configuration from API
+  // Initial data loading
   const fetchConfig = async () => {
-    setLoading(true);
-    setError(null);
     try {
       const res = await fetch('/api/v1/config');
-      if (!res.ok) {
-        throw new Error(`Failed to fetch config: HTTP ${res.status}`);
-      }
-      const data: StationConfig = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
       setConfig(data);
     } catch (err: any) {
-      setError(err.message || 'Error connecting to Hardy BPA Web API');
-    } finally {
-      setLoading(false);
+      setError(err.message || 'Failed to fetch config');
     }
   };
 
-  // Fetch active services snapshot
   const fetchServices = async () => {
     try {
       const res = await fetch('/api/v1/services');
-      if (res.ok) {
-        const data: ActiveService[] = await res.json();
-        setServices(data);
-      }
-    } catch {
-      // Retain existing services if network hiccup
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setServices(data);
+    } catch (err: any) {
+      console.warn('Failed to fetch services', err);
     }
   };
 
-  // Fetch unread chat messages total
   const fetchUnreadChat = async () => {
     try {
       const res = await fetch('/api/v1/chat/conversations');
-      if (res.ok) {
-        const convs = await res.json();
-        const total = convs.reduce((acc: number, c: any) => acc + (c.unread_count || 0), 0);
+      if (!res.ok) return;
+      const convs = await res.json();
+      if (Array.isArray(convs)) {
+        const total = convs.reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0);
         setUnreadChatTotal(total);
       }
-    } catch {
-      // Retain existing
+    } catch (err) {
+      console.warn('Failed to fetch unread chat count', err);
     }
   };
 
-  // Fetch unread files total
   const fetchUnreadFiles = async () => {
     try {
       const res = await fetch('/api/v1/files/unread');
-      if (res.ok) {
-        const data = await res.json();
-        setUnreadFilesTotal(data.unread_count ?? data.unread ?? 0);
-      }
-    } catch {
-      // Retain existing
+      if (!res.ok) return;
+      const data = await res.json();
+      const count = data.unread_count ?? data.unread ?? 0;
+      setUnreadFilesTotal(count);
+    } catch (err) {
+      console.warn('Failed to fetch unread files count', err);
     }
   };
 
-  const refreshAll = () => {
-    fetchConfig();
-    fetchServices();
-    fetchUnreadChat();
-    fetchUnreadFiles();
+  const refreshAll = async () => {
+    setLoading(true);
+    await Promise.all([fetchConfig(), fetchServices(), fetchUnreadChat(), fetchUnreadFiles()]);
+    setLoading(false);
   };
 
   useEffect(() => {
     refreshAll();
+  }, []);
 
-    // Setup Server-Sent Events (SSE) listener for reactive updates
+  // Setup Server-Sent Events (SSE) listener for reactive updates
+  useEffect(() => {
     let es: EventSource | null = null;
     try {
-      es = new EventSource('/api/v1/events');
+      const sseUrl = activeTab === 'logs' ? '/api/v1/events?logs=true' : '/api/v1/events';
+      setSseStatus('connecting');
+      es = new EventSource(sseUrl);
+
+      es.onopen = () => {
+        setSseStatus('connected');
+      };
+
+      es.onerror = () => {
+        setSseStatus('disconnected');
+      };
+
       es.addEventListener('services_update', (e) => {
         try {
           const updated: ActiveService[] = JSON.parse(e.data);
@@ -189,21 +212,52 @@ export function App() {
           console.error('Failed to parse services_update event', err);
         }
       });
+
       es.addEventListener('bundles_update', () => {
         setBundlesKey((k) => k + 1);
         fetchUnreadFiles();
       });
+
       es.addEventListener('chat_message', (e) => {
         try {
           const msg: ChatMessage = JSON.parse(e.data);
           setLastChatMessage(msg);
           fetchUnreadChat();
+          if (soundEnabled) {
+            playChime();
+          }
         } catch (err) {
           console.error('Failed to parse chat_message event', err);
         }
       });
+
+      es.addEventListener('file_received', () => {
+        setBundlesKey((k) => k + 1);
+        fetchUnreadFiles();
+        if (soundEnabled) {
+          playChime();
+        }
+      });
+
+      es.addEventListener('cla_state_changed', () => {
+        fetchConfig();
+      });
+
+      es.addEventListener('contact_window', () => {
+        fetchConfig();
+      });
+
+      es.addEventListener('log_entry', (e) => {
+        try {
+          const log: LogRecord = JSON.parse(e.data);
+          setIncomingLog(log);
+        } catch (err) {
+          console.error('Failed to parse log_entry event', err);
+        }
+      });
     } catch (err) {
       console.warn('Failed to initialize EventSource SSE connection', err);
+      setSseStatus('disconnected');
     }
 
     return () => {
@@ -211,7 +265,7 @@ export function App() {
         es.close();
       }
     };
-  }, []);
+  }, [activeTab, soundEnabled]);
 
   // Collect known peer candidates from config safely
   const peerSuggestions: string[] = Array.from(
@@ -261,6 +315,9 @@ export function App() {
         onTabChange={navigateToTab}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
+        soundEnabled={soundEnabled}
+        onToggleSound={handleToggleSound}
+        sseStatus={sseStatus}
         stationCallsign={config?.callsign || undefined}
         nodeId={config?.node_id}
         unreadChatCount={unreadChatTotal}
@@ -297,6 +354,11 @@ export function App() {
           <BundlesView
             key={bundlesKey}
             onRefresh={refreshAll}
+          />
+        ) : activeTab === 'logs' ? (
+          <LogsView
+            incomingLog={incomingLog}
+            sseStatus={sseStatus}
           />
         ) : (
           <SendBundleView

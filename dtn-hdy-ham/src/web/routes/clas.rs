@@ -39,20 +39,36 @@ pub async fn connect_peer_handler(
     }
 
     match state.cla_manager.connect_peer(&peer).await {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(json!({
-                "status": "connected",
-                "peer": peer,
-                "message": format!("Successfully connected to peer {peer}")
-            })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string(), "peer": peer })),
-        )
-            .into_response(),
+        Ok(()) => {
+            state.service_tracker.broadcast_cla_state(
+                "tcpcl",
+                "tcpclv4",
+                "connected",
+                Some(peer.clone()),
+            );
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "status": "connected",
+                    "peer": peer,
+                    "message": format!("Successfully connected to peer {peer}")
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            state.service_tracker.broadcast_cla_state(
+                "tcpcl",
+                "tcpclv4",
+                "disconnected",
+                Some(e.to_string()),
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string(), "peer": peer })),
+            )
+                .into_response()
+        }
     }
 }
 

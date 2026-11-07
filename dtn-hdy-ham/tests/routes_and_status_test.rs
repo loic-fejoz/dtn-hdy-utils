@@ -51,6 +51,7 @@ routes:
         chat_manager,
         internal_storage,
         route_manager: route_manager.clone(),
+        log_buffer: dtn_hdy_ham::LogBuffer::global(),
     };
     let app = create_router(state);
 

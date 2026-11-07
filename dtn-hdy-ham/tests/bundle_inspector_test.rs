@@ -65,6 +65,7 @@ async fn test_bundle_inspector_endpoints_and_lifecycle() {
         chat_manager,
         internal_storage,
         route_manager: server.route_manager(),
+        log_buffer: dtn_hdy_ham::LogBuffer::global(),
     };
     let app = create_router(state);
 
@@ -286,6 +287,7 @@ async fn test_in_memory_bundle_inspector_and_connect_peer() {
         chat_manager,
         internal_storage,
         route_manager: server.route_manager(),
+        log_buffer: dtn_hdy_ham::LogBuffer::global(),
     };
     let app = create_router(state);
 

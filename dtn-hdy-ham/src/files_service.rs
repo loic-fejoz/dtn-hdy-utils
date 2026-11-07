@@ -162,6 +162,7 @@ impl FilesService {
                 payload_slice.len()
             );
             self.service_tracker.broadcast_bundles_update();
+            self.service_tracker.broadcast_file_received(&record);
         }
 
         Ok(())

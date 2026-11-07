@@ -626,6 +626,7 @@ impl HamServer {
                 chat_manager: self.chat_manager.clone(),
                 internal_storage: self.chat_manager.clone(),
                 route_manager: self.route_manager.clone(),
+                log_buffer: crate::log_buffer::LogBuffer::global(),
             };
             let cancel = self.tasks.cancel_token().clone();
             let addr = web_config.address;

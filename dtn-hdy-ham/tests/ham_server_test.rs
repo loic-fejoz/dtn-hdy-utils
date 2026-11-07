@@ -216,6 +216,7 @@ async fn test_ham_web_api_routes() {
         chat_manager,
         internal_storage,
         route_manager: server.route_manager(),
+        log_buffer: dtn_hdy_ham::LogBuffer::global(),
     };
     let app = create_router(state);
 

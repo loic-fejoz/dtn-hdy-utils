@@ -158,3 +158,67 @@ async fn test_active_services_tracking_and_grpc_lifecycle() {
 
     s_handle.abort();
 }
+
+#[tokio::test]
+async fn test_log_buffer_endpoint_and_sse_events() {
+    let config = HamConfig {
+        callsign: Some("F4LOGS".to_string()),
+        node_id: "dtn://f4logs/".to_string(),
+        storage: dtn_hdy_ham::config::StorageConfig {
+            in_memory: true,
+            ..Default::default()
+        },
+        grpc: dtn_hdy_ham::config::GrpcConfig {
+            enabled: true,
+            address: "127.0.0.1:54322".parse().unwrap(),
+        },
+        web: Some(dtn_hdy_ham::config::WebConfig {
+            address: "127.0.0.1:8889".parse().unwrap(),
+            static_dir: std::path::PathBuf::from("./web/dist"),
+        }),
+        ..Default::default()
+    };
+
+    let server = HamServer::new(config).await.expect("HamServer builds");
+    let service_tracker = server.service_tracker();
+    let s_handle = tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Log something to global buffer
+    let log_buf = dtn_hdy_ham::LogBuffer::global();
+    log_buf.push(
+        "INFO".to_string(),
+        "test::service".to_string(),
+        "Integration test log message".to_string(),
+    );
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get("http://127.0.0.1:8889/api/v1/logs")
+        .send()
+        .await
+        .expect("logs request should succeed");
+
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = res.json().await.expect("valid JSON");
+    assert!(body["capacity"].as_u64().unwrap() >= 500);
+    let logs = body["logs"].as_array().expect("logs array");
+    assert!(!logs.is_empty());
+    assert!(
+        logs.iter()
+            .any(|l| l["message"] == "Integration test log message")
+    );
+
+    // Verify broadcast helpers on service_tracker
+    service_tracker.broadcast_cla_state("tcpcl-gw", "tcpclv4", "connected", Some("peer".into()));
+    service_tracker.broadcast_contact_window("sat-window", "open", "ltp-vhf");
+    service_tracker.broadcast_file_received(serde_json::json!({
+        "id": "file-bundle-123",
+        "size": 1024
+    }));
+
+    s_handle.abort();
+}

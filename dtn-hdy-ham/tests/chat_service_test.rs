@@ -73,6 +73,7 @@ async fn test_chat_service_full_workflow() {
         chat_manager: chat_manager.clone(),
         internal_storage,
         route_manager: server.route_manager(),
+        log_buffer: dtn_hdy_ham::LogBuffer::global(),
     };
     let app = create_router(state);
 
