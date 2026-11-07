@@ -1,5 +1,51 @@
 //! End-to-end integration tests for the HQFBP Convergence Layer Adapter.
 
+#[test]
+fn test_custom_encodings_pipeline() {
+    use hqfbp_rs::deframer::Deframer;
+    use hqfbp_rs::generator::PDUGenerator;
+
+    let encs = vec![
+        ContentEncoding::Gzip,
+        ContentEncoding::Chunk(150),
+        ContentEncoding::H,
+        ContentEncoding::ReedSolomon(255, 233),
+        ContentEncoding::Crc32,
+    ];
+
+    let mut pdu_gen = PDUGenerator::new(
+        Some("STATA".to_string()),
+        Some("STATB".to_string()),
+        Some(encs.clone()),
+        Some(encs.clone()),
+        1,
+    );
+
+    let payload = b"Hello STATB from STATA via G3RUH Direwolf HQFBP with Leaky Bucket pacing!";
+    let pdus = pdu_gen.generate(payload, None).unwrap();
+    eprintln!("Generated {} PDUs", pdus.len());
+
+    let mut deframer = Deframer::new();
+    deframer.register_peer_encodings("STATA", encs.clone());
+    deframer.register_peer_encodings("__hailing__", encs.clone());
+    deframer.register_peer_encodings("__default__", encs.clone());
+
+    let mut messages = Vec::new();
+    for (i, pdu) in pdus.iter().enumerate() {
+        eprintln!("Feeding PDU {} ({} bytes) to deframer...", i, pdu.len());
+        deframer.receive_bytes(pdu);
+        while let Some(ev) = deframer.next_event() {
+            eprintln!("Deframer event: {:?}", ev);
+            if let hqfbp_rs::deframer::Event::Message(msg) = ev {
+                messages.push(msg);
+            }
+        }
+    }
+
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].payload, payload.as_slice());
+}
+
 use std::time::Duration;
 use std::vec::Vec;
 

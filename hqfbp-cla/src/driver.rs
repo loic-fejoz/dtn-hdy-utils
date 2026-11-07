@@ -123,9 +123,11 @@ impl Driver {
 
             // Populate pre-configured peer encodings and address mappings
             for peer in &config.peers {
-                if let Some(ref encs) = peer.encodings {
-                    rx_manager.register_peer_encodings(peer.callsign.clone(), encs.clone());
-                }
+                let encs = peer
+                    .encodings
+                    .as_ref()
+                    .unwrap_or(&config.default_bundle_encodings);
+                rx_manager.register_peer_encodings(peer.callsign.clone(), encs.clone());
                 if let Some(addr) = peer.address {
                     callsign_to_addr.insert(peer.callsign.clone(), addr);
                     addr_to_callsign.insert(addr, peer.callsign.clone());
@@ -134,6 +136,10 @@ impl Driver {
                     callsign_to_node.insert(peer.callsign.clone(), node.clone());
                 }
             }
+            // Register hailing and default encodings so post-H FEC (RS, RQ) can be decoded in Phase 2
+            rx_manager.register_peer_encodings("__hailing__", config.hailing_encodings.clone());
+            rx_manager
+                .register_peer_encodings("__default__", config.default_bundle_encodings.clone());
 
             let mut driver = Self {
                 config,
@@ -277,6 +283,8 @@ impl Driver {
                             let _ = reply_tx.send(outcome);
                         }
                         DriverCommand::SetDefaultEncodings { encodings } => {
+                            self.rx_manager
+                                .register_peer_encodings("__default__", encodings.clone());
                             self.config.default_bundle_encodings = encodings;
                         }
                         DriverCommand::SetPeerEncodings { callsign, encodings } => {
@@ -687,6 +695,8 @@ impl Driver {
                             }
                         }
                         DriverCommand::SetDefaultEncodings { encodings } => {
+                            self.rx_manager
+                                .register_peer_encodings("__default__", encodings.clone());
                             self.config.default_bundle_encodings = encodings;
                         }
                         DriverCommand::SetPeerEncodings { callsign, encodings } => {

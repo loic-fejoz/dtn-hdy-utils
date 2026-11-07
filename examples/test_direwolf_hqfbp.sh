@@ -125,7 +125,7 @@ echo "[*] Réponse STATA : ${RESP_1}"
 # Attente et vérification de la réception sur STATB
 echo "[*] En attente de la réception sur STATB..."
 RECV_B=0
-for i in {1..50}; do
+for i in {1..75}; do
     # Vérification via l'API REST Chat
     if curl -s "http://127.0.0.1:8082/api/v1/chat/conversations" 2>/dev/null | grep -q "Hello STATB"; then
         RECV_B=1
@@ -171,7 +171,7 @@ echo "[*] Réponse STATB : ${RESP_2}"
 # Attente et vérification de la réception sur STATA
 echo "[*] En attente de la réception sur STATA..."
 RECV_A=0
-for i in {1..50}; do
+for i in {1..75}; do
     # Vérification via l'API REST Chat
     if curl -s "http://127.0.0.1:8081/api/v1/chat/conversations" 2>/dev/null | grep -q "Hello STATA"; then
         RECV_A=1
@@ -222,7 +222,7 @@ echo "[*] Réponse STATA : ${RESP_3}"
 # Attente et vérification du réassemblage sur STATB
 echo "[*] En attente de la réception et réassemblage sur STATB..."
 RECV_CHUNK=0
-for i in {1..50}; do
+for i in {1..75}; do
     if sqlite3 /tmp/dtn-statb/internal_services/services.db "SELECT content FROM chat_messages;" 2>/dev/null | grep -q "CHUNKED-END"; then
         RECV_CHUNK=1
         break

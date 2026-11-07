@@ -14,6 +14,40 @@ use hardy_bpv7::bundle::Id;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Visitor};
 
+/// Normalizes common encoding aliases (e.g. `crc(32)` -> `crc32`).
+pub fn normalize_encoding_token(s: &str) -> &str {
+    match s.trim() {
+        "crc(32)" | "crc-32" => "crc32",
+        "crc(16)" | "crc-16" => "crc16",
+        other => other,
+    }
+}
+
+/// Canonicalizes an encoding pipeline.
+/// When post-H encodings contain both Reed-Solomon (or RaptorQ) and CRC,
+/// ensures Reed-Solomon is applied first to the PDU and CRC is on the outer packet,
+/// avoiding zero-padding interference during CRC verification.
+pub fn canonicalize_encodings(mut encs: Vec<ContentEncoding>) -> Vec<ContentEncoding> {
+    if let Some(h_pos) = encs.iter().position(|e| matches!(e, ContentEncoding::H)) {
+        let post = &mut encs[h_pos + 1..];
+        let crc_pos = post
+            .iter()
+            .position(|e| matches!(e, ContentEncoding::Crc16 | ContentEncoding::Crc32));
+        let fec_pos = post.iter().position(|e| {
+            matches!(
+                e,
+                ContentEncoding::ReedSolomon(_, _) | ContentEncoding::RaptorQ(_, _, _)
+            )
+        });
+        if let (Some(c_idx), Some(f_idx)) = (crc_pos, fec_pos)
+            && c_idx < f_idx
+        {
+            post.swap(c_idx, f_idx);
+        }
+    }
+    encs
+}
+
 /// Parses a comma-separated or space-separated list of encoding strings, respecting parenthesized arguments.
 ///
 /// # Errors
@@ -36,7 +70,8 @@ pub fn parse_encodings_from_str(s: &str) -> core::result::Result<Vec<ContentEnco
             ',' | ';' if paren_depth == 0 => {
                 let trimmed = current.trim();
                 if !trimmed.is_empty() {
-                    let enc = ContentEncoding::try_from(trimmed).map_err(|e| e.to_string())?;
+                    let token = normalize_encoding_token(trimmed);
+                    let enc = ContentEncoding::try_from(token).map_err(|e| e.to_string())?;
                     list.push(enc);
                 }
                 current.clear();
@@ -48,10 +83,11 @@ pub fn parse_encodings_from_str(s: &str) -> core::result::Result<Vec<ContentEnco
     }
     let trimmed = current.trim();
     if !trimmed.is_empty() {
-        let enc = ContentEncoding::try_from(trimmed).map_err(|e| e.to_string())?;
+        let token = normalize_encoding_token(trimmed);
+        let enc = ContentEncoding::try_from(token).map_err(|e| e.to_string())?;
         list.push(enc);
     }
-    Ok(list)
+    Ok(canonicalize_encodings(list))
 }
 
 /// Dynamic encoding selector contract allowing on-the-fly customization of bundle encodings.
@@ -153,11 +189,11 @@ pub mod serde_encodings {
             {
                 let mut list = Vec::new();
                 while let Some(item) = seq.next_element::<String>()? {
-                    let enc = ContentEncoding::try_from(item.as_str())
-                        .map_err(serde::de::Error::custom)?;
+                    let token = normalize_encoding_token(item.as_str());
+                    let enc = ContentEncoding::try_from(token).map_err(serde::de::Error::custom)?;
                     list.push(enc);
                 }
-                Ok(list)
+                Ok(canonicalize_encodings(list))
             }
         }
 
@@ -205,12 +241,13 @@ mod tests {
 
     #[test]
     fn test_parse_encodings_from_str() {
-        let encs = parse_encodings_from_str("gzip, h, rs(255, 223), crc32").unwrap();
-        assert_eq!(encs.len(), 4);
+        let encs = parse_encodings_from_str("gzip, chunk(150), h, crc(32), rs(255, 233)").unwrap();
+        assert_eq!(encs.len(), 5);
         assert_eq!(encs[0], ContentEncoding::Gzip);
-        assert_eq!(encs[1], ContentEncoding::H);
-        assert_eq!(encs[2], ContentEncoding::ReedSolomon(255, 223));
-        assert_eq!(encs[3], ContentEncoding::Crc32);
+        assert_eq!(encs[1], ContentEncoding::Chunk(150));
+        assert_eq!(encs[2], ContentEncoding::H);
+        assert_eq!(encs[3], ContentEncoding::ReedSolomon(255, 233));
+        assert_eq!(encs[4], ContentEncoding::Crc32);
     }
 
     #[test]
