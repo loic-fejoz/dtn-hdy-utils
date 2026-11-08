@@ -113,14 +113,11 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
 
-      - name: Install Linux aarch64 Musl Cross Toolchain
+      - name: Install Zig and cargo-zigbuild
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          sudo mkdir -p /opt
-          curl --retry 5 --retry-delay 2 -sSL https://musl.cc/aarch64-linux-musl-cross.tgz -o /tmp/aarch64-cross.tgz
-          sudo tar -xzf /tmp/aarch64-cross.tgz -C /opt
-          rm -f /tmp/aarch64-cross.tgz
-          echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+          pip install --break-system-packages cargo-zigbuild ziglang || (pipx install cargo-zigbuild && pipx install ziglang)
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Setup Rust Toolchain (Target Specific)
         if: matrix.target != 'universal'
@@ -157,8 +154,8 @@ jobs:
       - name: Build Binaries (Linux aarch64 musl)
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-ham
-          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
+          cargo zigbuild --release --target ${{ matrix.target }} -p dtn-hdy-ham
+          cargo zigbuild --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
           mkdir -p bin
           cp target/${{ matrix.target }}/release/dtn-hdy-ham bin/
           for b in dtnsend dtnprint dtnfiles dtntrigger dtnquery dtnping dtnforward dtnbib dtnbasket dtnbasket-cli hdy-stats; do
@@ -166,8 +163,6 @@ jobs:
           done
         working-directory: dtn-hdy-utils
         env:
-          CC_aarch64_unknown_linux_musl: aarch64-linux-musl-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-musl-gcc
           RUSTFLAGS: "-C target-feature=+crt-static"
 
       - name: Build Binaries (Windows MSVC)
