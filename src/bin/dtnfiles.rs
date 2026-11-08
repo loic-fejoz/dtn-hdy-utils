@@ -171,8 +171,15 @@ fn detect_extension(data: &[u8]) -> &'static str {
         }
     }
 
-    // Check if valid text / Markdown
+    // Check if valid text / Markdown / SVG
     if let Ok(text) = std::str::from_utf8(data) {
+        let trimmed = text.trim_start();
+        if trimmed.starts_with("<svg")
+            || ((trimmed.starts_with("<?xml") || trimmed.starts_with("<!DOCTYPE"))
+                && trimmed.contains("<svg"))
+        {
+            return "svg";
+        }
         if text.starts_with('#') || text.contains("**") || text.contains("* ") {
             return "md";
         }
@@ -427,6 +434,16 @@ mod tests {
         assert_eq!(detect_extension(b"\x1a\x45\xdf\xa3webm"), "webm");
         assert_eq!(detect_extension(b"PK\x03\x04xxxx"), "zip");
         assert_eq!(detect_extension(b"\x1f\x8bxxxx"), "tar.gz");
+
+        // SVG detection
+        assert_eq!(
+            detect_extension(b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"),
+            "svg"
+        );
+        assert_eq!(
+            detect_extension(b"<?xml version=\"1.0\"?>\n<svg></svg>"),
+            "svg"
+        );
 
         // Text / Markdown detection
         assert_eq!(detect_extension(b"# Title\nHello"), "md");

@@ -42,11 +42,13 @@ pub fn serve_payload_with_range(
     }
 
     // Determine safe disposition type.
-    // Dangerous web types like HTML or SVG must NEVER be rendered inline without sandbox.
+    // Dangerous web types like HTML must NEVER be rendered inline without sandbox.
+    // SVGs are rendered safely within <img> tags with strict sandbox CSP.
     let is_safe_inline_mime = mime_type.starts_with("image/png")
         || mime_type.starts_with("image/jpeg")
         || mime_type.starts_with("image/gif")
         || mime_type.starts_with("image/webp")
+        || mime_type.starts_with("image/svg+xml")
         || mime_type.starts_with("audio/")
         || mime_type.starts_with("video/")
         || mime_type.starts_with("text/plain")

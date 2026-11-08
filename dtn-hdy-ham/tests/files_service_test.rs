@@ -444,6 +444,29 @@ async fn test_files_payload_range_requests_and_mime_detection() {
     };
     internal_storage.insert_file_bundle(&video_record).unwrap();
 
+    // Create an SVG test file
+    let svg_payload =
+        b"<svg xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"50\" cy=\"50\" r=\"40\"/></svg>";
+    let svg_path = storage_dir.join("test_image.svg");
+    tokio::fs::write(&svg_path, svg_payload).await.unwrap();
+
+    let svg_record = FileBundleRecord {
+        id: "test_svg_bundle".to_string(),
+        source_eid: "dtn://sender/files".to_string(),
+        destination_eid: "dtn://stata/files".to_string(),
+        creation_timestamp: 12347,
+        lifetime_secs: 3600,
+        size: svg_payload.len() as u64,
+        mime_type: "image/svg+xml".to_string(),
+        payload_path: svg_path.to_str().unwrap().to_string(),
+        created_at: "2026-11-05T10:00:02Z".to_string(),
+        expiry_timestamp: 12347 + 3600 * 1000,
+        is_sticky: false,
+        is_read: false,
+        auth_status: "unsigned".to_string(),
+    };
+    internal_storage.insert_file_bundle(&svg_record).unwrap();
+
     let config = HamConfig {
         callsign: Some("STATA".to_string()),
         node_id: "dtn://stata/".to_string(),
@@ -649,6 +672,31 @@ async fn test_files_payload_range_requests_and_mime_detection() {
     );
     let body_bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
     assert_eq!(&body_bytes[..], b"ftyp");
+
+    // 8. SVG full download: 200 OK, dynamic MIME type detected as image/svg+xml, inline disposition
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/files/test_svg_bundle/payload")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get("content-type").unwrap().to_str().unwrap(),
+        "image/svg+xml"
+    );
+    assert_eq!(
+        res.headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "inline; filename=\"test_image.svg\""
+    );
 }
 
 fn url_encode(input: &str) -> String {

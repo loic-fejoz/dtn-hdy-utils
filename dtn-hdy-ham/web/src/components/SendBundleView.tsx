@@ -51,7 +51,8 @@ export function SendBundleView({
     if (
       selectedFile &&
       (selectedFile.type.startsWith('video/') ||
-        selectedFile.name.match(/\.(mp4|webm|ogv)$/i))
+        selectedFile.type.startsWith('image/') ||
+        selectedFile.name.match(/\.(mp4|webm|ogv|png|jpg|jpeg|gif|webp|svg)$/i))
     ) {
       const url = URL.createObjectURL(selectedFile);
       setFilePreviewUrl(url);
@@ -498,17 +499,31 @@ export function SendBundleView({
                       </button>
                     </div>
 
-                    {filePreviewUrl && (
-                      <div class="w-full max-w-md p-2 bg-black/90 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700">
-                        <video
-                          controls
-                          playsinline
-                          preload="metadata"
-                          src={filePreviewUrl}
-                          class="max-h-64 w-full rounded-lg"
-                        />
-                      </div>
-                    )}
+                    {filePreviewUrl &&
+                      (selectedFile.type.startsWith('video/') ||
+                        selectedFile.name.match(/\.(mp4|webm|ogv)$/i)) && (
+                        <div class="w-full max-w-md p-2 bg-black/90 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700">
+                          <video
+                            controls
+                            playsinline
+                            preload="metadata"
+                            src={filePreviewUrl}
+                            class="max-h-64 w-full rounded-lg"
+                          />
+                        </div>
+                      )}
+
+                    {filePreviewUrl &&
+                      (selectedFile.type.startsWith('image/') ||
+                        selectedFile.name.match(/\.(png|jpg|jpeg|gif|webp|svg)$/i)) && (
+                        <div class="w-full max-w-md p-2 bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 flex justify-center">
+                          <img
+                            src={filePreviewUrl}
+                            alt="File Preview"
+                            class="max-h-64 object-contain rounded-lg"
+                          />
+                        </div>
+                      )}
                   </div>
                 )}
               </div>

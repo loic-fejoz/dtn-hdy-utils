@@ -143,6 +143,14 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
 
     // Check if valid UTF-8 text
     if let Ok(text) = std::str::from_utf8(data) {
+        let trimmed = text.trim_start();
+        if trimmed.starts_with("<svg")
+            || ((trimmed.starts_with("<?xml") || trimmed.starts_with("<!DOCTYPE"))
+                && trimmed.contains("<svg"))
+        {
+            return ("image/svg+xml", false);
+        }
+
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(text) {
             let is_senml = if let Some(arr) = val.as_array() {
                 arr.iter().any(|item| {
@@ -599,6 +607,13 @@ mod tests {
 
         let webp = b"RIFF\x14\x00\x00\x00WEBPVP8 ";
         assert_eq!(infer_mime_type(webp), ("image/webp", true));
+
+        let svg_direct = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><circle r=\"10\"/></svg>";
+        assert_eq!(infer_mime_type(svg_direct), ("image/svg+xml", false));
+
+        let svg_xml =
+            b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg viewBox=\"0 0 100 100\"></svg>";
+        assert_eq!(infer_mime_type(svg_xml), ("image/svg+xml", false));
     }
 
     #[test]
