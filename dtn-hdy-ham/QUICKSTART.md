@@ -14,6 +14,7 @@ This release package contains static, self-contained binaries that require no ex
   - `dtnprint`: Command-line bundle receiving / logging utility.
   - `dtnfiles`: Command-line file distribution and retrieval tool.
   - `dtntrigger`: Command-line event execution utility on bundle reception.
+- `web/dist/`: Precompiled static web assets for the web dashboard.
 - `config.example.toml`: Documented configuration template.
 - `dtn-hdy-ham.service`: Systemd service unit template for Linux systems.
 

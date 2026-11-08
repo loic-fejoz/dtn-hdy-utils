@@ -303,6 +303,12 @@ pub fn default_web_static_dir() -> PathBuf {
         if candidate.exists() {
             return candidate;
         }
+        if let Some(parent) = exe_dir.parent() {
+            let candidate_parent = parent.join("web").join("dist");
+            if candidate_parent.exists() {
+                return candidate_parent;
+            }
+        }
         PathBuf::from("web/dist")
     } else {
         PathBuf::from("web/dist")
@@ -318,7 +324,7 @@ pub struct WebConfig {
     pub address: SocketAddr,
 
     /// Directory containing static web assets (Vite dist).
-    #[serde(default = "default_web_static_dir")]
+    #[serde(default = "default_web_static_dir", alias = "web-dist")]
     pub static_dir: PathBuf,
 }
 

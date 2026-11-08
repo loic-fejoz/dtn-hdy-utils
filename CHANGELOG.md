@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Software Bill of Materials (SBOM)**: Automated SPDX and CycloneDX SBOM generation.
 
 ### Fixed
+- Fixed missing web dist assets in release archives and automated relative static directory discovery.
 - Fixed encoding deserialization validation in `hardy-hqfbp-cla`.
 - Removed broken symlink `examples/dtnsend` preventing Windows and macOS release packaging.
 - Hardened CI and Release pipelines with Protoc download fallback and SBOM error tolerance.

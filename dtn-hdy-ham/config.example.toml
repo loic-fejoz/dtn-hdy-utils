@@ -52,7 +52,7 @@ enabled = true
 # Listening socket for browser access (Interactive Chat, Files, Diagnostics)
 address = "127.0.0.1:8080"
 # Directory containing precompiled web assets (embedded by default in releases)
-# web-dist = "web/dist"
+# static-dir = "web/dist"
 
 # Convergence Layer Adapters (CLAs)
 # ---------------------------------

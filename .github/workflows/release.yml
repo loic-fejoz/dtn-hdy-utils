@@ -212,12 +212,14 @@ jobs:
           # 1. Assemble dtn-hdy-ham Package
           HAM_ROOT="dtn-hdy-ham-${VERSION}-${PLATFORM}"
           mkdir -p "${HAM_ROOT}/bin"
+          mkdir -p "${HAM_ROOT}/web/dist"
           
           ham_bins=("dtn-hdy-ham" "dtnsend" "dtnprint" "dtnfiles" "dtntrigger")
           for b in "${ham_bins[@]}"; do
             cp "dtn-hdy-utils/bin/${b}${BIN_EXT}" "${HAM_ROOT}/bin/"
           done
           
+          cp -r dtn-hdy-utils/dtn-hdy-ham/web/dist/* "${HAM_ROOT}/web/dist/"
           cp "dtn-hdy-utils/dtn-hdy-ham/config.example.toml" "${HAM_ROOT}/"
           cp "dtn-hdy-utils/dtn-hdy-ham/QUICKSTART.md" "${HAM_ROOT}/"
           if [[ "${PLATFORM}" == linux* ]]; then
@@ -283,9 +285,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download all package artifacts
+      - name: Download all package archives
         uses: actions/download-artifact@v4
         with:
+          pattern: packages-*
           path: all_archives
           merge-multiple: true
 

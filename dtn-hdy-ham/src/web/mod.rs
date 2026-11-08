@@ -49,6 +49,21 @@ pub fn create_router(state: AppState) -> Router {
         let candidate = exe_dir.join(&static_dir);
         if candidate.exists() {
             static_dir = candidate;
+        } else if let Some(parent) = exe_dir.parent() {
+            let candidate_parent = parent.join(&static_dir);
+            if candidate_parent.exists() {
+                static_dir = candidate_parent;
+            } else {
+                let alt = exe_dir.join("web").join("dist");
+                if alt.exists() {
+                    static_dir = alt;
+                } else {
+                    let alt_parent = parent.join("web").join("dist");
+                    if alt_parent.exists() {
+                        static_dir = alt_parent;
+                    }
+                }
+            }
         } else {
             let alt = exe_dir.join("web").join("dist");
             if alt.exists() {
