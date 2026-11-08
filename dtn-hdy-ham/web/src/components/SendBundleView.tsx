@@ -41,7 +41,7 @@ export function SendBundleView({
   const defaultSource = computeDefaultFilesSource(stationNodeId, stationCallsign);
   const [source, setSource] = useState(defaultSource);
   const [destination, setDestination] = useState(defaultDestination || '');
-  const [lifetime, setLifetime] = useState('3600');
+  const [lifetime, setLifetime] = useState('259200');
   const [mode, setMode] = useState<'text' | 'file' | 'voice'>('text');
   const [textPayload, setTextPayload] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -292,7 +292,7 @@ export function SendBundleView({
           body: JSON.stringify({
             destination: destination.trim(),
             source: source.trim() || undefined,
-            lifetime: parseInt(lifetime, 10) || 3600,
+            lifetime: parseInt(lifetime, 10) || 259200,
             payload: textPayload,
           }),
         });
@@ -380,19 +380,51 @@ export function SendBundleView({
 
           {/* Bundle Lifetime */}
           <div>
-            <label for="send-lifetime-input" class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2">
-              Bundle Lifetime (Seconds)
-            </label>
-            <input
-              id="send-lifetime-input"
-              type="number"
-              min="10"
-              value={lifetime}
-              onInput={(e) => setLifetime((e.target as HTMLInputElement).value)}
-              class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
-            />
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <label for="send-lifetime-input" class="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                ⏱️ Bundle Lifetime (Seconds)
+              </label>
+              {/* Quick duration presets */}
+              <div class="flex items-center space-x-1">
+                {[
+                  { label: '1h', secs: 3600 },
+                  { label: '6h', secs: 21600 },
+                  { label: '24h', secs: 86400 },
+                  { label: '72h', secs: 259200 },
+                  { label: '1w', secs: 604800 },
+                ].map((p) => {
+                  const isActive = lifetime === p.secs.toString();
+                  return (
+                    <button
+                      key={p.secs}
+                      type="button"
+                      onClick={() => setLifetime(p.secs.toString())}
+                      class={`px-2 py-0.5 rounded text-[11px] font-mono transition ${
+                        isActive
+                          ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 font-semibold border border-emerald-300 dark:border-emerald-700'
+                          : 'bg-slate-100 dark:bg-slate-900 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div class="relative flex items-center">
+              <input
+                id="send-lifetime-input"
+                type="number"
+                min="10"
+                value={lifetime}
+                onInput={(e) => setLifetime((e.target as HTMLInputElement).value)}
+                placeholder="259200"
+                class="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 font-mono text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+              />
+              <span class="absolute right-4 font-mono text-xs text-slate-400 pointer-events-none">seconds</span>
+            </div>
             <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-              Default 3600 seconds (1 hour store-and-forward retention).
+              Default 259200 seconds (72 hours store-and-forward retention). Select a preset or enter a custom duration in seconds.
             </p>
           </div>
 

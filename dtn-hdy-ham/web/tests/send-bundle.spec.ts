@@ -44,7 +44,17 @@ test.describe('Send Bundle View', () => {
     await expect(destInput).toHaveValue('');
 
     const lifetimeInput = page.locator('input[type="number"]');
+    await expect(lifetimeInput).toHaveValue('259200');
+
+    // Test preset buttons
+    await page.getByRole('button', { name: '1h', exact: true }).click();
     await expect(lifetimeInput).toHaveValue('3600');
+
+    await page.getByRole('button', { name: '24h', exact: true }).click();
+    await expect(lifetimeInput).toHaveValue('86400');
+
+    await page.getByRole('button', { name: '72h', exact: true }).click();
+    await expect(lifetimeInput).toHaveValue('259200');
   });
 
   test('submits a text bundle and displays the returned bundle ID', async ({ page }) => {
@@ -62,7 +72,7 @@ test.describe('Send Bundle View', () => {
             source: 'dtn://f4jxq/files',
             destination: 'dtn://f1xyz/bulletin',
             payload_size: 33,
-            lifetime_secs: 3600,
+            lifetime_secs: 259200,
           }),
         });
       }
@@ -79,7 +89,7 @@ test.describe('Send Bundle View', () => {
     expect(interceptedRequestBody).toEqual({
       source: 'dtn://f4jxq/files',
       destination: 'dtn://f1xyz/bulletin',
-      lifetime: 3600,
+      lifetime: 259200,
       payload: '73 de F4JXQ - CQ DTN test over VHF',
     });
 
