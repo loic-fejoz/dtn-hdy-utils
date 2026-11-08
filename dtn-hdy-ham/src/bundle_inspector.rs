@@ -94,12 +94,18 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
     if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
         return ("image/webp", true);
     }
+    if data.len() >= 2 && &data[0..2] == b"BM" {
+        return ("image/bmp", true);
+    }
 
     // Video signatures
     if data.len() >= 12 && &data[4..8] == b"ftyp" {
         let brand = &data[8..12];
         if brand == b"M4A " || brand == b"m4a " || brand == b"M4B " || brand == b"f4a " {
             return ("audio/mp4", true);
+        }
+        if brand == b"avif" || brand == b"avis" {
+            return ("image/avif", true);
         }
         return ("video/mp4", true);
     }
@@ -117,6 +123,9 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
     // Audio signatures
     if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WAVE" {
         return ("audio/wav", true);
+    }
+    if data.len() >= 4 && &data[0..4] == b"fLaC" {
+        return ("audio/flac", true);
     }
     if data.len() >= 4 && &data[0..4] == b"OggS" {
         if data.len() >= 36 {
@@ -141,6 +150,41 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
         return ("audio/mpeg", true);
     }
 
+    // Document and Database signatures
+    if data.len() >= 5 && &data[0..5] == b"%PDF-" {
+        return ("application/pdf", true);
+    }
+    if data.len() >= 16 && &data[0..16] == b"SQLite format 3\0" {
+        return ("application/vnd.sqlite3", true);
+    }
+
+    // Archive & Compressed signatures
+    if data.len() >= 2 && &data[0..2] == b"\x1F\x8B" {
+        return ("application/gzip", true);
+    }
+    if data.len() >= 3 && &data[0..3] == b"BZh" {
+        return ("application/x-bzip2", true);
+    }
+    if data.len() >= 6 && &data[0..6] == b"\xFD7zXZ\x00" {
+        return ("application/x-xz", true);
+    }
+    if data.len() >= 4 && &data[0..4] == b"\x28\xB5\x2F\xFD" {
+        return ("application/zstd", true);
+    }
+    if data.len() >= 6 && &data[0..6] == b"7z\xBC\xAF\x27\x1C" {
+        return ("application/x-7z-compressed", true);
+    }
+    if data.len() >= 4
+        && (&data[0..4] == b"PK\x03\x04"
+            || &data[0..4] == b"PK\x05\x06"
+            || &data[0..4] == b"PK\x07\x08")
+    {
+        return ("application/zip", true);
+    }
+    if data.len() >= 262 && &data[257..262] == b"ustar" {
+        return ("application/x-tar", true);
+    }
+
     // Check if valid UTF-8 text
     if let Ok(text) = std::str::from_utf8(data) {
         let trimmed = text.trim_start();
@@ -149,6 +193,20 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
                 && trimmed.contains("<svg"))
         {
             return ("image/svg+xml", false);
+        }
+
+        if trimmed.starts_with("<gpx")
+            || ((trimmed.starts_with("<?xml") || trimmed.starts_with("<!--"))
+                && trimmed.contains("<gpx"))
+        {
+            return ("application/gpx+xml", false);
+        }
+
+        if trimmed.starts_with("<kml")
+            || ((trimmed.starts_with("<?xml") || trimmed.starts_with("<!--"))
+                && trimmed.contains("<kml"))
+        {
+            return ("application/vnd.google-earth.kml+xml", false);
         }
 
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(text) {
@@ -165,6 +223,13 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
             if is_senml {
                 return ("application/senml+json", false);
             }
+
+            if let Some(t) = val.get("type").and_then(|t| t.as_str()) {
+                if t == "FeatureCollection" || t == "Feature" || t == "GeometryCollection" {
+                    return ("application/geo+json", false);
+                }
+            }
+
             return ("application/json", false);
         }
 
@@ -614,6 +679,57 @@ mod tests {
         let svg_xml =
             b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg viewBox=\"0 0 100 100\"></svg>";
         assert_eq!(infer_mime_type(svg_xml), ("image/svg+xml", false));
+
+        let bmp = b"BM\x36\x00\x00\x00\x00\x00\x00\x00";
+        assert_eq!(infer_mime_type(bmp), ("image/bmp", true));
+
+        let avif = b"\x00\x00\x00\x20ftypavif\x00\x00\x00\x00avifmif1";
+        assert_eq!(infer_mime_type(avif), ("image/avif", true));
+    }
+
+    #[test]
+    fn test_infer_mime_type_documents_and_archives() {
+        let pdf = b"%PDF-1.7\n%abc";
+        assert_eq!(infer_mime_type(pdf), ("application/pdf", true));
+
+        let sqlite = b"SQLite format 3\0\x10\x00\x01\x01";
+        assert_eq!(infer_mime_type(sqlite), ("application/vnd.sqlite3", true));
+
+        let zip = b"PK\x03\x04\x14\x00\x00\x00";
+        assert_eq!(infer_mime_type(zip), ("application/zip", true));
+
+        let gzip = b"\x1F\x8B\x08\x00\x00\x00\x00\x00";
+        assert_eq!(infer_mime_type(gzip), ("application/gzip", true));
+
+        let bzip2 = b"BZh91AY&SY";
+        assert_eq!(infer_mime_type(bzip2), ("application/x-bzip2", true));
+
+        let xz = b"\xFD7zXZ\x00\x00\x01";
+        assert_eq!(infer_mime_type(xz), ("application/x-xz", true));
+
+        let zstd = b"\x28\xB5\x2F\xFD\x04\x00";
+        assert_eq!(infer_mime_type(zstd), ("application/zstd", true));
+
+        let seven_z = b"7z\xBC\xAF\x27\x1C\x00\x04";
+        assert_eq!(
+            infer_mime_type(seven_z),
+            ("application/x-7z-compressed", true)
+        );
+
+        let flac = b"fLaC\x00\x00\x00\x22";
+        assert_eq!(infer_mime_type(flac), ("audio/flac", true));
+
+        let gpx = b"<?xml version=\"1.0\"?>\n<gpx version=\"1.1\"><wpt lat=\"48.85\" lon=\"2.35\"></wpt></gpx>";
+        assert_eq!(infer_mime_type(gpx), ("application/gpx+xml", false));
+
+        let kml = b"<?xml version=\"1.0\"?>\n<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Placemark></Placemark></kml>";
+        assert_eq!(
+            infer_mime_type(kml),
+            ("application/vnd.google-earth.kml+xml", false)
+        );
+
+        let geojson = br#"{"type": "FeatureCollection", "features": []}"#;
+        assert_eq!(infer_mime_type(geojson), ("application/geo+json", false));
     }
 
     #[test]

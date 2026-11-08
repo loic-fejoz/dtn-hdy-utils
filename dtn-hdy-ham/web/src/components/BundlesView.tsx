@@ -75,6 +75,26 @@ function getMimeBadge(mime: string) {
   if (mime.startsWith('audio/')) {
     return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border-indigo-300';
   }
+  if (mime.includes('pdf')) {
+    return 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-rose-300';
+  }
+  if (
+    mime.includes('zip') ||
+    mime.includes('compressed') ||
+    mime.includes('tar') ||
+    mime.includes('gzip') ||
+    mime.includes('zstd') ||
+    mime.includes('xz') ||
+    mime.includes('bzip')
+  ) {
+    return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300 border-cyan-300';
+  }
+  if (mime.includes('sqlite') || mime.includes('sql')) {
+    return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border-blue-300';
+  }
+  if (mime.includes('gpx') || mime.includes('kml') || mime.includes('geo')) {
+    return 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 border-teal-300';
+  }
   if (mime.includes('senml') || mime.includes('json')) {
     return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300';
   }

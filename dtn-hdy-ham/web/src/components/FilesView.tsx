@@ -549,6 +549,22 @@ export function FilesView({
                         ? '🎬'
                         : b.mime_type.startsWith('audio/')
                         ? '🎵'
+                        : b.mime_type.includes('pdf')
+                        ? '📕'
+                        : b.mime_type.includes('zip') ||
+                          b.mime_type.includes('compressed') ||
+                          b.mime_type.includes('tar') ||
+                          b.mime_type.includes('gzip') ||
+                          b.mime_type.includes('zstd') ||
+                          b.mime_type.includes('xz') ||
+                          b.mime_type.includes('bzip')
+                        ? '🗜️'
+                        : b.mime_type.includes('sqlite') || b.mime_type.includes('sql')
+                        ? '🗄️'
+                        : b.mime_type.includes('gpx') ||
+                          b.mime_type.includes('kml') ||
+                          b.mime_type.includes('geo')
+                        ? '🗺️'
                         : b.mime_type.startsWith('text/')
                         ? '📄'
                         : '📦'}

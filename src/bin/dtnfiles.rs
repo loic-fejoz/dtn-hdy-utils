@@ -89,13 +89,49 @@ fn detect_extension(data: &[u8]) -> &'static str {
         if data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 {
             return "gif";
         }
-        // Check ZIP (PK\x03\x04)
-        if data[0] == 0x50 && data[1] == 0x4B && data[2] == 0x03 && data[3] == 0x04 {
+        // Check PDF
+        if len >= 5 && &data[0..5] == b"%PDF-" {
+            return "pdf";
+        }
+        // Check SQLite
+        if len >= 16 && &data[0..16] == b"SQLite format 3\0" {
+            return "sqlite";
+        }
+        // Check FLAC
+        if &data[0..4] == b"fLaC" {
+            return "flac";
+        }
+        // Check XZ
+        if len >= 6 && &data[0..6] == b"\xFD7zXZ\x00" {
+            return "xz";
+        }
+        // Check Zstandard
+        if &data[0..4] == b"\x28\xB5\x2F\xFD" {
+            return "zst";
+        }
+        // Check 7-Zip
+        if len >= 6 && &data[0..6] == b"7z\xBC\xAF\x27\x1C" {
+            return "7z";
+        }
+        // Check TAR (ustar)
+        if len >= 262 && &data[257..262] == b"ustar" {
+            return "tar";
+        }
+        // Check ZIP (PK\x03\x04 or PK\x05\x06)
+        if data[0] == 0x50
+            && data[1] == 0x4B
+            && (data[2] == 0x03 || data[2] == 0x05 || data[2] == 0x07)
+            && (data[3] == 0x04 || data[3] == 0x06 || data[3] == 0x08)
+        {
             return "zip";
         }
         // Check WEBP (RIFFxxxxWEBP)
         if len >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
             return "webp";
+        }
+        // Check WAV (RIFFxxxxWAVE)
+        if len >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WAVE" {
+            return "wav";
         }
         // Check BMP
         if data[0] == 0x42 && data[1] == 0x4D {
@@ -113,6 +149,10 @@ fn detect_extension(data: &[u8]) -> &'static str {
         if data[0] == 0x1F && data[1] == 0x8B {
             return "tar.gz";
         }
+        // Check BZIP2
+        if &data[0..3] == b"BZh" {
+            return "bz2";
+        }
         // Check WebM / Matroska
         if &data[0..4] == b"\x1A\x45\xDF\xA3" {
             let search_len = len.min(128);
@@ -121,11 +161,14 @@ fn detect_extension(data: &[u8]) -> &'static str {
             }
             return "webm";
         }
-        // Check M4A/MP4 (ftyp at offset 4)
+        // Check M4A/MP4/AVIF (ftyp at offset 4)
         if len >= 12 && &data[4..8] == b"ftyp" {
             let brand = &data[8..12];
             if brand == b"M4A " || brand == b"m4a " || brand == b"M4B " || brand == b"f4a " {
                 return "m4a";
+            }
+            if brand == b"avif" || brand == b"avis" {
+                return "avif";
             }
             return "mp4";
         } else if len >= 8 && &data[4..8] == b"ftyp" {
@@ -171,7 +214,7 @@ fn detect_extension(data: &[u8]) -> &'static str {
         }
     }
 
-    // Check if valid text / Markdown / SVG
+    // Check if valid text / Markdown / SVG / Geo
     if let Ok(text) = std::str::from_utf8(data) {
         let trimmed = text.trim_start();
         if trimmed.starts_with("<svg")
@@ -179,6 +222,25 @@ fn detect_extension(data: &[u8]) -> &'static str {
                 && trimmed.contains("<svg"))
         {
             return "svg";
+        }
+        if trimmed.starts_with("<gpx")
+            || ((trimmed.starts_with("<?xml") || trimmed.starts_with("<!--"))
+                && trimmed.contains("<gpx"))
+        {
+            return "gpx";
+        }
+        if trimmed.starts_with("<kml")
+            || ((trimmed.starts_with("<?xml") || trimmed.starts_with("<!--"))
+                && trimmed.contains("<kml"))
+        {
+            return "kml";
+        }
+        if (text.contains("\"FeatureCollection\"") || text.contains("\"Feature\""))
+            && let Ok(val) = serde_json::from_str::<serde_json::Value>(text)
+            && let Some(t) = val.get("type").and_then(|t| t.as_str())
+            && (t == "FeatureCollection" || t == "Feature" || t == "GeometryCollection")
+        {
+            return "geojson";
         }
         if text.starts_with('#') || text.contains("**") || text.contains("* ") {
             return "md";
@@ -432,6 +494,13 @@ mod tests {
         assert_eq!(detect_extension(b"\0\0\0\x20ftypM4A "), "m4a");
         assert_eq!(detect_extension(b"\0\0\0\x20ftypisom"), "mp4");
         assert_eq!(detect_extension(b"\x1a\x45\xdf\xa3webm"), "webm");
+        assert_eq!(detect_extension(b"%PDF-1.7"), "pdf");
+        assert_eq!(detect_extension(b"SQLite format 3\0\x01"), "sqlite");
+        assert_eq!(detect_extension(b"fLaC\0\0"), "flac");
+        assert_eq!(detect_extension(b"\xFD7zXZ\x00\0"), "xz");
+        assert_eq!(detect_extension(b"\x28\xB5\x2F\xFD\0"), "zst");
+        assert_eq!(detect_extension(b"7z\xBC\xAF\x27\x1C\0"), "7z");
+        assert_eq!(detect_extension(b"BZh9"), "bz2");
         assert_eq!(detect_extension(b"PK\x03\x04xxxx"), "zip");
         assert_eq!(detect_extension(b"\x1f\x8bxxxx"), "tar.gz");
 
@@ -443,6 +512,14 @@ mod tests {
         assert_eq!(
             detect_extension(b"<?xml version=\"1.0\"?>\n<svg></svg>"),
             "svg"
+        );
+
+        // Geospatial detection
+        assert_eq!(detect_extension(b"<gpx version=\"1.1\"></gpx>"), "gpx");
+        assert_eq!(detect_extension(b"<kml xmlns=\"...\"></kml>"), "kml");
+        assert_eq!(
+            detect_extension(br#"{"type": "FeatureCollection", "features": []}"#),
+            "geojson"
         );
 
         // Text / Markdown detection
