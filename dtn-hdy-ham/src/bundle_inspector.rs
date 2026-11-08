@@ -95,6 +95,25 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
         return ("image/webp", true);
     }
 
+    // Video signatures
+    if data.len() >= 12 && &data[4..8] == b"ftyp" {
+        let brand = &data[8..12];
+        if brand == b"M4A " || brand == b"m4a " || brand == b"M4B " || brand == b"f4a " {
+            return ("audio/mp4", true);
+        }
+        return ("video/mp4", true);
+    }
+    if data.len() >= 4 && &data[0..4] == b"\x1A\x45\xDF\xA3" {
+        let search_len = data.len().min(128);
+        if data[..search_len].windows(4).any(|w| w == b"webm") {
+            return ("video/webm", true);
+        }
+        if data[..search_len].windows(8).any(|w| w == b"matroska") {
+            return ("video/x-matroska", true);
+        }
+        return ("video/webm", true);
+    }
+
     // Audio signatures
     if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WAVE" {
         return ("audio/wav", true);
@@ -107,6 +126,11 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
                 && &data[packet_offset..packet_offset + 8] == b"OpusHead"
             {
                 return ("audio/ogg; codecs=opus", true);
+            }
+            if data.len() >= packet_offset + 7
+                && &data[packet_offset..packet_offset + 7] == b"\x80theora"
+            {
+                return ("video/ogg", true);
             }
         }
         return ("audio/ogg", true);
@@ -548,6 +572,18 @@ mod tests {
         assert!(safe_payload_path(base, "..\\windows\\system32").is_err());
         assert!(safe_payload_path(base, ".").is_err());
         assert!(safe_payload_path(base, "..").is_err());
+    }
+
+    #[test]
+    fn test_infer_mime_type_video() {
+        let mp4 = b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2mp41";
+        assert_eq!(infer_mime_type(mp4), ("video/mp4", true));
+
+        let m4a = b"\x00\x00\x00\x20ftypM4A \x00\x00\x00\x00M4A mp42isom";
+        assert_eq!(infer_mime_type(m4a), ("audio/mp4", true));
+
+        let webm = b"\x1A\x45\xDF\xA3\x9F\x42\x86\x81\x01\x42\xF7\x81\x01\x42\xF2\x81\x04\x42\xF3\x81\x08\x42\x82\x84webm";
+        assert_eq!(infer_mime_type(webm), ("video/webm", true));
     }
 
     #[test]

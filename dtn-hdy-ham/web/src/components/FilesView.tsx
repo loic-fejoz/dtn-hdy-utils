@@ -400,6 +400,22 @@ export function FilesView({
                   class="max-h-[500px] max-w-full rounded-lg shadow-sm object-contain"
                 />
               </div>
+            ) : detailData.bundle.mime_type.startsWith('video/') ? (
+              /* Video Player */
+              <div class="p-4 bg-slate-50 dark:bg-slate-900 rounded-xl flex flex-col items-center">
+                <video
+                  controls
+                  playsinline
+                  preload="metadata"
+                  class="max-h-[500px] max-w-full rounded-lg shadow-sm bg-black"
+                >
+                  <source
+                    src={`/api/v1/files/${encodeURIComponent(detailData.bundle.id)}/payload`}
+                    type={detailData.bundle.mime_type}
+                  />
+                  Your browser does not support the video element.
+                </video>
+              </div>
             ) : detailData.bundle.mime_type.startsWith('audio/') ? (
               /* Audio Player */
               <div class="p-6 bg-slate-50 dark:bg-slate-900 rounded-xl flex flex-col items-center">
@@ -529,6 +545,8 @@ export function FilesView({
                     <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 flex-shrink-0 flex items-center justify-center text-lg" aria-hidden="true">
                       {b.mime_type.startsWith('image/')
                         ? '🖼️'
+                        : b.mime_type.startsWith('video/')
+                        ? '🎬'
                         : b.mime_type.startsWith('audio/')
                         ? '🎵'
                         : b.mime_type.startsWith('text/')

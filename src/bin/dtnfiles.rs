@@ -113,9 +113,23 @@ fn detect_extension(data: &[u8]) -> &'static str {
         if data[0] == 0x1F && data[1] == 0x8B {
             return "tar.gz";
         }
+        // Check WebM / Matroska
+        if &data[0..4] == b"\x1A\x45\xDF\xA3" {
+            let search_len = len.min(128);
+            if data[..search_len].windows(8).any(|w| w == b"matroska") {
+                return "mkv";
+            }
+            return "webm";
+        }
         // Check M4A/MP4 (ftyp at offset 4)
-        if len >= 8 && &data[4..8] == b"ftyp" {
-            return "m4a";
+        if len >= 12 && &data[4..8] == b"ftyp" {
+            let brand = &data[8..12];
+            if brand == b"M4A " || brand == b"m4a " || brand == b"M4B " || brand == b"f4a " {
+                return "m4a";
+            }
+            return "mp4";
+        } else if len >= 8 && &data[4..8] == b"ftyp" {
+            return "mp4";
         }
     } else if len >= 3 {
         // Check JPEG
@@ -408,7 +422,9 @@ mod tests {
         assert_eq!(detect_extension(b"OggS"), "ogg");
         assert_eq!(detect_extension(b"ID3xxx"), "mp3");
         assert_eq!(detect_extension(b"\xff\xe0\0"), "mp3");
-        assert_eq!(detect_extension(b"\0\0\0\0ftypm4a"), "m4a");
+        assert_eq!(detect_extension(b"\0\0\0\x20ftypM4A "), "m4a");
+        assert_eq!(detect_extension(b"\0\0\0\x20ftypisom"), "mp4");
+        assert_eq!(detect_extension(b"\x1a\x45\xdf\xa3webm"), "webm");
         assert_eq!(detect_extension(b"PK\x03\x04xxxx"), "zip");
         assert_eq!(detect_extension(b"\x1f\x8bxxxx"), "tar.gz");
 

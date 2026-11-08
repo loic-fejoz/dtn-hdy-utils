@@ -419,6 +419,31 @@ async fn test_files_payload_range_requests_and_mime_detection() {
     };
     internal_storage.insert_file_bundle(&record).unwrap();
 
+    // Create an MP4 video test file
+    let mut mp4_payload = vec![0u8; 64];
+    mp4_payload[0..4].copy_from_slice(b"\x00\x00\x00\x20");
+    mp4_payload[4..8].copy_from_slice(b"ftyp");
+    mp4_payload[8..12].copy_from_slice(b"isom");
+    let video_path = storage_dir.join("test_video.mp4");
+    tokio::fs::write(&video_path, &mp4_payload).await.unwrap();
+
+    let video_record = FileBundleRecord {
+        id: "test_video_bundle".to_string(),
+        source_eid: "dtn://sender/files".to_string(),
+        destination_eid: "dtn://stata/files".to_string(),
+        creation_timestamp: 12346,
+        lifetime_secs: 3600,
+        size: 64,
+        mime_type: "video/mp4".to_string(),
+        payload_path: video_path.to_str().unwrap().to_string(),
+        created_at: "2026-11-05T10:00:01Z".to_string(),
+        expiry_timestamp: 12346 + 3600 * 1000,
+        is_sticky: false,
+        is_read: false,
+        auth_status: "unsigned".to_string(),
+    };
+    internal_storage.insert_file_bundle(&video_record).unwrap();
+
     let config = HamConfig {
         callsign: Some("STATA".to_string()),
         node_id: "dtn://stata/".to_string(),
@@ -575,6 +600,55 @@ async fn test_files_payload_range_requests_and_mime_detection() {
             .unwrap(),
         "bytes */50"
     );
+
+    // 6. Video full download: 200 OK, dynamic MIME type detected as video/mp4, inline disposition
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/files/test_video_bundle/payload")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get("content-type").unwrap().to_str().unwrap(),
+        "video/mp4"
+    );
+    assert_eq!(
+        res.headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "inline; filename=\"test_video.mp4\""
+    );
+
+    // 7. Video partial range request: bytes=4-7 -> 206 Partial Content (ftyp box)
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/files/test_video_bundle/payload")
+                .header("range", "bytes=4-7")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        res.headers()
+            .get("content-range")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "bytes 4-7/64"
+    );
+    let body_bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+    assert_eq!(&body_bytes[..], b"ftyp");
 }
 
 fn url_encode(input: &str) -> String {

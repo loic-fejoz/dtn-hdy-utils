@@ -69,6 +69,9 @@ function getMimeBadge(mime: string) {
   if (mime.startsWith('image/')) {
     return 'bg-pink-100 text-pink-800 dark:bg-pink-950 dark:text-pink-300 border-pink-300';
   }
+  if (mime.startsWith('video/')) {
+    return 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border-purple-300';
+  }
   if (mime.startsWith('audio/')) {
     return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border-indigo-300';
   }
@@ -578,6 +581,24 @@ export function BundlesView({ onRefresh }: BundlesViewProps) {
                               class="max-h-96 max-w-full rounded-lg shadow-md border border-slate-200 dark:border-slate-700 object-contain bg-white dark:bg-slate-950 p-2"
                             />
                             <div class="text-xs text-slate-500 dark:text-slate-400 mt-2 font-mono">
+                              {bundleDetail.mime_type} · {formatBytes(bundleDetail.payload_size)}
+                            </div>
+                          </div>
+                        ) : bundleDetail.mime_type.startsWith('video/') ? (
+                          <div class="flex flex-col items-center justify-center p-4 space-y-3">
+                            <video
+                              controls
+                              playsinline
+                              preload="metadata"
+                              class="max-h-96 max-w-full rounded-lg shadow-md border border-slate-200 dark:border-slate-700 bg-black"
+                            >
+                              <source
+                                src={`/api/v1/bundles/payload?id=${encodeURIComponent(bundleDetail.id)}`}
+                                type={bundleDetail.mime_type}
+                              />
+                              Your browser does not support the video element.
+                            </video>
+                            <div class="text-xs text-slate-500 dark:text-slate-400 font-mono">
                               {bundleDetail.mime_type} · {formatBytes(bundleDetail.payload_size)}
                             </div>
                           </div>

@@ -45,6 +45,23 @@ export function SendBundleView({
   const [mode, setMode] = useState<'text' | 'file' | 'voice'>('text');
   const [textPayload, setTextPayload] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      selectedFile &&
+      (selectedFile.type.startsWith('video/') ||
+        selectedFile.name.match(/\.(mp4|webm|ogv)$/i))
+    ) {
+      const url = URL.createObjectURL(selectedFile);
+      setFilePreviewUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      setFilePreviewUrl(null);
+    }
+  }, [selectedFile]);
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -468,16 +485,30 @@ export function SendBundleView({
                   </span>
                 </label>
                 {selectedFile && (
-                  <div class="mt-4 p-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-mono inline-flex items-center gap-2">
-                    <span class="font-bold text-slate-800 dark:text-slate-200">{selectedFile.name}</span>
-                    <span class="text-slate-400">({(selectedFile.size / 1024).toFixed(1)} KB)</span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFile(null)}
-                      class="text-red-500 hover:text-red-700 ml-1 font-bold"
-                    >
-                      ✕
-                    </button>
+                  <div class="mt-4 flex flex-col items-center gap-3">
+                    <div class="p-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-mono inline-flex items-center gap-2">
+                      <span class="font-bold text-slate-800 dark:text-slate-200">{selectedFile.name}</span>
+                      <span class="text-slate-400">({(selectedFile.size / 1024).toFixed(1)} KB)</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFile(null)}
+                        class="text-red-500 hover:text-red-700 ml-1 font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {filePreviewUrl && (
+                      <div class="w-full max-w-md p-2 bg-black/90 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700">
+                        <video
+                          controls
+                          playsinline
+                          preload="metadata"
+                          src={filePreviewUrl}
+                          class="max-h-64 w-full rounded-lg"
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
