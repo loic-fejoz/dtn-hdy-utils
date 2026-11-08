@@ -12,7 +12,7 @@ cargo-fuzz = true
 bytes = "1"
 hardy-bpa = { version = "0.2", path = "../../../hardy/bpa" }
 hardy-bpv7 = { version = "0.6", path = "../../../hardy/bpv7" }
-hardy-ltp = { version = "0.1", path = "../../ltp" }
+hardy-ltp = { version = "0.2", path = "../../ltp" }
 hardy-ltp-cla = { path = ".." }
 libfuzzer-sys = "0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "net", "io-util"] }

@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "cla-commons"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tokio",
  "tracing",
@@ -1018,7 +1018,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dtn-hdy-ham"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "dtn-hdy-utils"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1597,7 +1597,7 @@ dependencies = [
 
 [[package]]
 name = "hardy-hqfbp-cla"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "cla-commons",
@@ -1648,7 +1648,7 @@ dependencies = [
 
 [[package]]
 name = "hardy-ltp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "criterion",
@@ -1663,7 +1663,7 @@ dependencies = [
 
 [[package]]
 name = "hardy-ltp-cla"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "cla-commons",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "hardy-mercury-cla"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "hardy-async",

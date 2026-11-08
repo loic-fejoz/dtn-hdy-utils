@@ -97,16 +97,17 @@ jobs:
           path: hqfbp-rs
           ref: "960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec"
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        continue-on-error: true
-        with:
-          version: '28.3'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Ensure Protoc on Linux
+      - name: Install Protoc (Linux)
         if: runner.os == 'Linux'
-        run: which protoc || (sudo apt-get update && sudo apt-get install -y protobuf-compiler)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install Protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install Protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc -y
 
       - name: Install Linux x86_64 Musl Tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
@@ -115,7 +116,10 @@ jobs:
       - name: Install Linux aarch64 Musl Cross Toolchain
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          curl -sSL https://musl.cc/aarch64-linux-musl-cross.tgz | sudo tar -xzC /opt
+          sudo mkdir -p /opt
+          curl --retry 5 --retry-delay 2 -sSL https://musl.cc/aarch64-linux-musl-cross.tgz -o /tmp/aarch64-cross.tgz
+          sudo tar -xzf /tmp/aarch64-cross.tgz -C /opt
+          rm -f /tmp/aarch64-cross.tgz
           echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
 
       - name: Setup Rust Toolchain (Target Specific)

@@ -36,14 +36,7 @@ jobs:
           ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
 
       - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        continue-on-error: true
-        with:
-          version: '28.3'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Ensure Protoc on Linux
-        run: which protoc || (sudo apt-get update && sudo apt-get install -y protobuf-compiler)
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
