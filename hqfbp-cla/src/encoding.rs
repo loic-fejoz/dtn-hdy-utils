@@ -17,10 +17,19 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Visitor};
 /// Parses a comma-separated or space-separated list of encoding strings using `hqfbp_rs::parse_encodings`.
 ///
 /// # Errors
-/// Returns an error string if any of the tokenized encodings cannot be parsed.
+/// Returns an error string if any of the tokenized encodings cannot be parsed or are unrecognized.
 pub fn parse_encodings_from_str(s: &str) -> core::result::Result<Vec<ContentEncoding>, String> {
     let normalized = s.replace("crc(32)", "crc32").replace("crc(16)", "crc16");
-    Ok(hqfbp_rs::parse_encodings(&normalized))
+    let encs = hqfbp_rs::parse_encodings(&normalized);
+    for enc in &encs {
+        if let ContentEncoding::OtherString(s) = enc {
+            return Err(format!("invalid or unrecognized encoding: '{s}'"));
+        }
+        if let ContentEncoding::OtherInteger(i) = enc {
+            return Err(format!("invalid or unrecognized encoding integer: {i}"));
+        }
+    }
+    Ok(encs)
 }
 
 /// Dynamic encoding selector contract allowing on-the-fly customization of bundle encodings.

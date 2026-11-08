@@ -97,20 +97,27 @@ jobs:
           path: hqfbp-rs
           ref: "960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec"
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Protoc (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install Protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install Protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc -y
 
       - name: Install Linux x86_64 Musl Tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
 
-      - name: Install Linux aarch64 Musl Cross Toolchain
+      - name: Install Zig and cargo-zigbuild
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          curl -sSL https://musl.cc/aarch64-linux-musl-cross.tgz | sudo tar -xzC /opt
-          echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+          pip install --break-system-packages cargo-zigbuild ziglang || (pipx install cargo-zigbuild && pipx install ziglang)
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Setup Rust Toolchain (Target Specific)
         if: matrix.target != 'universal'
@@ -147,8 +154,8 @@ jobs:
       - name: Build Binaries (Linux aarch64 musl)
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-ham
-          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
+          cargo zigbuild --release --target ${{ matrix.target }} -p dtn-hdy-ham
+          cargo zigbuild --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
           mkdir -p bin
           cp target/${{ matrix.target }}/release/dtn-hdy-ham bin/
           for b in dtnsend dtnprint dtnfiles dtntrigger dtnquery dtnping dtnforward dtnbib dtnbasket dtnbasket-cli hdy-stats; do
@@ -156,8 +163,6 @@ jobs:
           done
         working-directory: dtn-hdy-utils
         env:
-          CC_aarch64_unknown_linux_musl: aarch64-linux-musl-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-musl-gcc
           RUSTFLAGS: "-C target-feature=+crt-static"
 
       - name: Build Binaries (Windows MSVC)

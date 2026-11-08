@@ -1,6 +1,6 @@
 [package]
 name = "dtn-hdy-ham"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -21,9 +21,9 @@ hardy-proto = { version = "0.2", path = "../../hardy/proto", features = ["serde"
 hardy-sqlite-storage = { version = "0.6", path = "../../hardy/sqlite-storage" }
 hardy-localdisk-storage = { version = "0.6", path = "../../hardy/localdisk-storage" }
 hardy-tcpclv4 = { version = "0.4", path = "../../hardy/tcpclv4", features = ["serde"] }
-hardy-ltp-cla = { version = "0.1", path = "../ltp-cla", features = ["serde"] }
-hardy-hqfbp-cla = { version = "0.1", path = "../hqfbp-cla", features = ["serde", "serial"] }
-hardy-mercury-cla = { version = "0.1", path = "../mercury-cla", features = ["serde"] }
+hardy-ltp-cla = { version = "0.2", path = "../ltp-cla", features = ["serde"] }
+hardy-hqfbp-cla = { version = "0.2", path = "../hqfbp-cla", features = ["serde", "serial"] }
+hardy-mercury-cla = { version = "0.2", path = "../mercury-cla", features = ["serde"] }
 time = { version = "0.3", features = ["parsing", "formatting", "local-offset"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "net"] }
 config = { version = "0.15", features = ["yaml", "toml", "json"] }
