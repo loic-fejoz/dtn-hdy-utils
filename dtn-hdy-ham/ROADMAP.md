@@ -474,6 +474,42 @@ flowchart TD
 
 ---
 
+### Phase 9: Repository Security Scanning, Static Analysis & Code Quality Guardrails
+> **Goal**: Protect the repository against secrets leakage, supply-chain vulnerabilities, unsafe memory/FFI regressions, and code smell regressions with both fast local runs for autonomous coding agents and automated enforcement in GitHub Actions CI/CD.
+
+#### Prioritized Security Matrix:
+
+##### Priorité 1 : Hygiène immédiate, Secrets & Audit des dépendances (Implémentation immédiate)
+* [x] **Secret Scanning (Gitleaks)** :
+  * Détection proactive des secrets, clés privées, jetons API et HMAC avant commit et dans la CI.
+  * Fichier de configuration `.gitleaks.toml` dédié, intégrant des règles adaptées et allowlistant les fixtures de test et clés factices DTN/BPSec.
+* [x] **Audit des vulnérabilités logicielles des dépendances (RustSec & Frontend)** :
+  * Audit des crates Rust via `cargo audit` adossé à la base RustSec Advisory Database.
+  * Audit des dépendances Web Preact/Vite via `pnpm audit` / `npm audit`.
+* [x] **Script d'exécution local unifié (`scripts/check-security.sh`)** :
+  * Outil CLI simple, rapide (< 5 secondes) et reproductible exécutable par l'agent ou le développeur en amont de tout commit.
+  * Mode permissif/guidé en local (affichage clair des commandes d'installation si un binaire manque) et mode strict (bloquant, code de retour non-nul) en CI.
+* [x] **Intégration CI GitHub Actions (`.github/workflows/ci.yml`)** :
+  * Ajout d'une étape ou d'un job de vérification de sécurité automatisé sur chaque Pull Request et push sur `main`.
+* [x] **Mise à jour des consignes de développement (`AGENTS.md`)** :
+  * Ajout de `./scripts/check-security.sh` dans les vérifications impératives de l'agent.
+
+##### Priorité 2 : Conformité des licences, bannissement de dépendances & Couverture de tests
+* [ ] **Gouvernance des licences et doublons (`cargo-deny`)** :
+  * Validation stricte des licences autorisées (MIT, Apache-2.0, BSD-3-Clause) et blocage des licences restrictives ou incompatibles (GPLv3 virale non souhaitée sur les bibliothèques).
+  * Détection et interdiction des crates dupliquées (versions multiples d'une même dépendance transitive).
+* [ ] **Surveillance de la couverture de code (`cargo-llvm-cov` / `cargo-tarpaulin`)** :
+  * Intégration de métriques de couverture de tests sur les composants critiques (`hardy-bpsec`, `hardy-ltp`, parsers SenML et CBOR).
+  * Prévention des régressions sur les branches sensibles et les cas d'erreur de parsing réseau.
+
+##### Priorité 3 : Analyse sémantique avancée (SAST) & Sécurité mémoire
+* [ ] **Analyse statique approfondie (GitHub CodeQL / Semgrep)** :
+  * Détection sémantique des vulnérabilités web/API (traversée de répertoires sur `/api/v1/files`, SSRF, désérialisation non bornée, injections).
+* [ ] **Audit du code `unsafe` (`cargo-geiger`)** :
+  * Cartographie et contrôle continu du code `unsafe` direct et transitif dans l'écosystème Rust utilisé.
+
+---
+
 ## 5. Technical Requirements & Dependencies
 
 ### Backend (Rust / Axum)

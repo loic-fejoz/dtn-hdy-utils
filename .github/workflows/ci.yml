@@ -91,3 +91,51 @@ jobs:
             sbom.cdx.json
           if-no-files-found: ignore
 
+  security-audit:
+    name: Security & Secret Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout dtn-hdy-utils
+        uses: actions/checkout@v7
+        with:
+          path: dtn-hdy-utils
+          fetch-depth: 0
+
+      - name: Checkout hardy dependency
+        uses: actions/checkout@v7
+        with:
+          repository: ricktaylor/hardy
+          path: hardy
+          ref: '260fe751a0d8058d3a438d3b588bc05502bd1727'
+
+      - name: Checkout hqfbp-rs dependency
+        uses: actions/checkout@v7
+        with:
+          repository: loic-fejoz/hqfbp-rs
+          path: hqfbp-rs
+          ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
+
+      - name: Install Protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install security scanners (gitleaks & cargo-audit)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gitleaks_8.24.0_linux_x64.tar.gz | sudo tar -xz -C /usr/local/bin gitleaks
+          curl -sSfL https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.2/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz | sudo tar -xz -C /usr/local/bin --strip-components=1 cargo-audit-x86_64-unknown-linux-gnu-v0.22.2/cargo-audit
+
+      - name: Setup Node & pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Run Security & Quality Guardrails
+        run: ./scripts/check-security.sh --strict
+        working-directory: dtn-hdy-utils
+
+

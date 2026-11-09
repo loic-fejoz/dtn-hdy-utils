@@ -1,0 +1,30 @@
+# Gitleaks configuration for dtn-hdy-utils
+# Ref: https://github.com/gitleaks/gitleaks
+
+title = "dtn-hdy-utils security scanning configuration"
+
+[allowlist]
+description = "Global allowlist for benign test fixtures, build artifacts, docs and lockfiles"
+paths = [
+    '''Cargo\.lock$''',
+    '''pnpm-lock\.yaml$''',
+    '''package-lock\.json$''',
+    '''target/.*''',
+    '''dtn-hdy-ham/web/dist/.*''',
+    '''dtn-hdy-ham/web/node_modules/.*''',
+    '''tests/.*''',
+    '''.*_test\.rs$''',
+    '''.*\.spec\.ts$''',
+    '''examples/.*''',
+    '''adr/.*''',
+    '''.*\.md$'''
+]
+
+stopwords = [
+    "dummy_key",
+    "mock_key",
+    "test_key",
+    "secret_key_12345",
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "dtn-hdy-ham-bpsec-fingerprint-v1"
+]

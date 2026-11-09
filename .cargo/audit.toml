@@ -1,0 +1,9 @@
+# cargo-audit configuration
+# Ref: https://docs.rs/rustsec/latest/rustsec/report/settings/struct.AuditConfig.html
+
+[advisories]
+ignore = [
+    # libsqlite3-sys via C SQLite CVE-2026-119375
+    # Inherited via hardy-sqlite-storage which currently pins rusqlite 0.40.
+    "RUSTSEC-2026-0459",
+]
