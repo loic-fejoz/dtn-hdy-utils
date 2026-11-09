@@ -24,11 +24,31 @@ pub fn cla_address_to_callsign(cla_addr: &ClaAddress) -> Option<String> {
     }
 }
 
+/// Checks whether raw callsign bytes represent a broadcast destination (`"CQ"`, `""`), with link-time no-panic guarantee.
+#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+#[must_use]
+pub fn is_broadcast_callsign_bytes(mut callsign: &[u8]) -> bool {
+    while let [first, rest @ ..] = callsign {
+        if first.is_ascii_whitespace() {
+            callsign = rest;
+        } else {
+            break;
+        }
+    }
+    while let [rest @ .., last] = callsign {
+        if last.is_ascii_whitespace() {
+            callsign = rest;
+        } else {
+            break;
+        }
+    }
+    matches!(callsign, [] | [b'C' | b'c', b'Q' | b'q'])
+}
+
 /// Checks whether a given callsign represents a broadcast destination (e.g. `"CQ"`, `""`).
 #[must_use]
 pub fn is_broadcast_callsign(callsign: &str) -> bool {
-    let trimmed = callsign.trim();
-    trimmed.is_empty() || trimmed.eq_ignore_ascii_case(BROADCAST_CALLSIGN)
+    is_broadcast_callsign_bytes(callsign.as_bytes())
 }
 
 #[cfg(test)]

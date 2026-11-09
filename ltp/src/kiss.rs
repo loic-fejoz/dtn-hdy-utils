@@ -63,8 +63,11 @@ pub enum Command {
     Unknown(u8),
 }
 
-impl From<u8> for Command {
-    fn from(code: u8) -> Self {
+impl Command {
+    /// Decodes a command byte into a [`Command`] variant with no-panic guarantee.
+    #[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+    #[must_use]
+    pub fn from_u8(code: u8) -> Self {
         match code & 0x0F {
             0x00 => Command::Data,
             0x01 => Command::TxDelay,
@@ -77,11 +80,12 @@ impl From<u8> for Command {
             other => Command::Unknown(other),
         }
     }
-}
 
-impl From<Command> for u8 {
-    fn from(cmd: Command) -> Self {
-        match cmd {
+    /// Converts a [`Command`] variant into its wire command byte with no-panic guarantee.
+    #[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+    #[must_use]
+    pub fn to_u8(self) -> u8 {
+        match self {
             Command::Data => 0x00,
             Command::TxDelay => 0x01,
             Command::Persistence => 0x02,
@@ -92,6 +96,18 @@ impl From<Command> for u8 {
             Command::Return => 0x0F,
             Command::Unknown(code) => code & 0x0F,
         }
+    }
+}
+
+impl From<u8> for Command {
+    fn from(code: u8) -> Self {
+        Self::from_u8(code)
+    }
+}
+
+impl From<Command> for u8 {
+    fn from(cmd: Command) -> Self {
+        cmd.to_u8()
     }
 }
 
@@ -144,6 +160,51 @@ pub fn escape(input: &[u8], out: &mut Vec<u8>) {
             }
         }
     }
+}
+
+/// Unescapes an escaped byte slice in-place without heap allocations.
+///
+/// Overwrites `buf` and returns the exact number of unescaped valid bytes (`0..=buf.len()`).
+/// Guaranteed to never panic at link time in release mode.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidEscape`] if `FESC` is followed by an invalid byte.
+/// Returns [`Error::TruncatedEscape`] if `FESC` is the last byte in the slice.
+#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+pub fn unescape_in_place(buf: &mut [u8]) -> Result<usize> {
+    let mut read_idx = 0;
+    let mut write_idx = 0;
+    let len = buf.len();
+
+    while read_idx < len {
+        let b = buf[read_idx];
+        if b == FESC {
+            let next_idx = read_idx + 1;
+            if next_idx >= len {
+                return Err(Error::TruncatedEscape);
+            }
+            let next_b = buf[next_idx];
+            match next_b {
+                TFEND => {
+                    buf[write_idx] = FEND;
+                    write_idx += 1;
+                }
+                TFESC => {
+                    buf[write_idx] = FESC;
+                    write_idx += 1;
+                }
+                other => return Err(Error::InvalidEscape(other)),
+            }
+            read_idx += 2;
+        } else {
+            buf[write_idx] = b;
+            write_idx += 1;
+            read_idx += 1;
+        }
+    }
+
+    Ok(write_idx)
 }
 
 /// Unescapes an escaped byte slice.
@@ -362,5 +423,13 @@ mod tests {
         assert_eq!(consumed, buf.len());
         assert_eq!(frame.port, 1);
         assert_eq!(frame.payload, valid_payload);
+    }
+
+    #[test]
+    fn test_unescape_in_place() {
+        let mut buf = alloc::vec![0x01, FESC, TFEND, 0x02, FESC, TFESC, 0x03];
+        let n = unescape_in_place(&mut buf).unwrap();
+        assert_eq!(n, 5);
+        assert_eq!(&buf[..n], &[0x01, FEND, 0x02, FESC, 0x03]);
     }
 }

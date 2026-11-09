@@ -1557,6 +1557,7 @@ dependencies = [
  "hardy-bpv7",
  "hqfbp-rs",
  "humantime",
+ "no-panic",
  "proptest",
  "rand 0.8.8",
  "serde",

@@ -56,11 +56,11 @@ jobs:
         working-directory: dtn-hdy-utils
 
       - name: Clippy Lint
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --exclude hardy-hqfbp-cla-fuzz --exclude hardy-ltp-cla-fuzz --exclude hardy-ltp-fuzz -- -D warnings
         working-directory: dtn-hdy-utils
 
       - name: Run Tests
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace --all-targets --exclude hardy-hqfbp-cla-fuzz --exclude hardy-ltp-cla-fuzz --exclude hardy-ltp-fuzz
         working-directory: dtn-hdy-utils
 
       - name: Generate SPDX SBOM
@@ -137,5 +137,49 @@ jobs:
       - name: Run Security & Quality Guardrails
         run: ./scripts/check-security.sh --strict
         working-directory: dtn-hdy-utils
+
+  fuzz-smoke-tests:
+    name: Fuzz Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout dtn-hdy-utils
+        uses: actions/checkout@v7
+        with:
+          path: dtn-hdy-utils
+
+      - name: Checkout hardy dependency
+        uses: actions/checkout@v7
+        with:
+          repository: ricktaylor/hardy
+          path: hardy
+          ref: '260fe751a0d8058d3a438d3b588bc05502bd1727'
+
+      - name: Checkout hqfbp-rs dependency
+        uses: actions/checkout@v7
+        with:
+          repository: loic-fejoz/hqfbp-rs
+          path: hqfbp-rs
+          ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
+
+      - name: Install Protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Setup Nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run LTP Fuzz Smoke Test
+        run: |
+          cargo fuzz run segment_decode -- -max_total_time=15
+          cargo fuzz run sdnv_kiss -- -max_total_time=15
+        working-directory: dtn-hdy-utils/ltp
+
+      - name: Run HQFBP CLA Fuzz Smoke Test
+        run: cargo fuzz run parse_frame -- -max_total_time=15
+        working-directory: dtn-hdy-utils/hqfbp-cla
+
 
 

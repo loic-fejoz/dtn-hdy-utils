@@ -174,9 +174,11 @@ pub fn serve_payload_with_range(
     (StatusCode::OK, headers, Body::from(bytes)).into_response()
 }
 
-/// Streams a file from disk with O(1) memory footprint and full HTTP Range support.
-pub async fn serve_payload_file_with_range(
+/// Streams an arbitrary byte slice of a file from disk with O(1) memory footprint and full HTTP Range support.
+pub async fn serve_payload_file_slice_with_range(
     path: &std::path::Path,
+    slice_offset: u64,
+    slice_len: u64,
     raw_mime: &str,
     filename: &str,
     is_download: bool,
@@ -185,23 +187,14 @@ pub async fn serve_payload_file_with_range(
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     use tokio_util::io::ReaderStream;
 
-    let metadata = match tokio::fs::metadata(path).await {
-        Ok(m) => m,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
-    };
-    let total_len = metadata.len();
+    let total_len = slice_len;
     let mut mime_type = raw_mime.to_string();
 
-    // Check Ogg Opus header from first 64 bytes
+    // Check Ogg Opus header from first 64 bytes of the slice
     if (mime_type == "audio/ogg" || mime_type == "audio/opus" || mime_type.is_empty())
         && total_len >= 36
         && let Ok(mut f) = tokio::fs::File::open(path).await
+        && f.seek(std::io::SeekFrom::Start(slice_offset)).await.is_ok()
     {
         let mut head = [0u8; 64];
         if let Ok(n) = f.read(&mut head).await
@@ -237,7 +230,8 @@ pub async fn serve_payload_file_with_range(
                             .into_response();
                     }
                 };
-                if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+                let physical_start = slice_offset.saturating_add(start);
+                if let Err(e) = file.seek(std::io::SeekFrom::Start(physical_start)).await {
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(serde_json::json!({ "error": e.to_string() })),
@@ -263,7 +257,7 @@ pub async fn serve_payload_file_with_range(
     }
 
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from(total_len));
-    let file = match tokio::fs::File::open(path).await {
+    let mut file = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         Err(e) => {
             return (
@@ -273,6 +267,44 @@ pub async fn serve_payload_file_with_range(
                 .into_response();
         }
     };
-    let stream = ReaderStream::new(file);
+    if let Err(e) = file.seek(std::io::SeekFrom::Start(slice_offset)).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response();
+    }
+    let take = file.take(total_len);
+    let stream = ReaderStream::new(take);
     (StatusCode::OK, headers, Body::from_stream(stream)).into_response()
+}
+
+/// Streams an entire file from disk with O(1) memory footprint and full HTTP Range support.
+pub async fn serve_payload_file_with_range(
+    path: &std::path::Path,
+    raw_mime: &str,
+    filename: &str,
+    is_download: bool,
+    req_headers: &HeaderMap,
+) -> Response {
+    let metadata = match tokio::fs::metadata(path).await {
+        Ok(m) => m,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    serve_payload_file_slice_with_range(
+        path,
+        0,
+        metadata.len(),
+        raw_mime,
+        filename,
+        is_download,
+        req_headers,
+    )
+    .await
 }

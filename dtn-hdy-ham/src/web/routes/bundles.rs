@@ -354,14 +354,19 @@ pub async fn get_bundle_payload_handler(
     let db_path = state.config.storage.effective_db_path();
     let payload_dir = state.config.storage.effective_payload_dir();
 
-    match crate::bundle_inspector::get_bundle_payload(&db_path, &payload_dir, &id).await {
-        Ok(Some((bytes, mime))) => super::serve_payload_with_range(
-            bytes.into(),
-            mime,
-            "bundle_payload.bin",
-            query.download.unwrap_or(false),
-            &req_headers,
-        ),
+    match crate::bundle_inspector::get_bundle_payload_location(&db_path, &payload_dir, &id).await {
+        Ok(Some(loc)) => {
+            super::serve_payload_file_slice_with_range(
+                &loc.path,
+                loc.offset,
+                loc.length,
+                loc.mime_type,
+                "bundle_payload.bin",
+                query.download.unwrap_or(false),
+                &req_headers,
+            )
+            .await
+        }
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "Bundle or payload not found" })),

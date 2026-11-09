@@ -500,12 +500,24 @@ pub fn delete_bundle_db_record(db_path: &Path, id_bytes: &[u8]) -> anyhow::Resul
     Ok(deleted > 0)
 }
 
-/// Fetches the raw extracted payload bytes and its detected MIME type for a given bundle key.
-pub async fn get_bundle_payload(
+/// Describes the disk location and byte slice of an extracted bundle payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundlePayloadLocation {
+    pub path: PathBuf,
+    pub offset: u64,
+    pub length: u64,
+    pub mime_type: &'static str,
+}
+
+/// Locates the disk path, byte slice, and MIME type of a bundle's payload.
+///
+/// Uses incremental parsing to determine the payload block boundaries without
+/// loading large payload bodies into memory.
+pub async fn get_bundle_payload_location(
     db_path: &Path,
     payload_dir: &Path,
     bundle_key: &str,
-) -> anyhow::Result<Option<(Vec<u8>, &'static str)>> {
+) -> anyhow::Result<Option<BundlePayloadLocation>> {
     let Some((_id_bytes, storage_name)) = lookup_bundle_storage_info(db_path, bundle_key)? else {
         return Ok(None);
     };
@@ -519,17 +531,85 @@ pub async fn get_bundle_payload(
         return Ok(None);
     }
 
-    let raw_bytes = tokio::fs::read(&payload_path).await?;
-    if let Ok(parsed) = hardy_bpv7::parse::parse(raw_bytes.clone().into())
-        && let Some(p_block) = parsed.bundle.blocks.get(&1)
-        && let Some(payload_slice) = p_block.payload(&parsed.data)
-    {
-        let (mime, _) = infer_mime_type(payload_slice);
-        return Ok(Some((payload_slice.to_vec(), mime)));
+    let file_metadata = tokio::fs::metadata(&payload_path).await?;
+    let file_len = file_metadata.len();
+    if file_len == 0 {
+        return Ok(Some(BundlePayloadLocation {
+            path: payload_path,
+            offset: 0,
+            length: 0,
+            mime_type: "application/octet-stream",
+        }));
     }
 
-    let (mime, _) = infer_mime_type(&raw_bytes);
-    Ok(Some((raw_bytes, mime)))
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let mut file = tokio::fs::File::open(&payload_path).await?;
+
+    // Read up to 64 KiB header prefix to parse bundle structure with O(1) memory
+    let to_read = (file_len.min(65536)) as usize;
+    let mut header_buf = vec![0u8; to_read];
+    file.read_exact(&mut header_buf).await?;
+
+    let mut parser = hardy_bpv7::parse::BundleParser::default();
+    let parsed_opt = match parser.push(bytes::Bytes::from(header_buf)) {
+        Ok(hardy_bpv7::parse::ParserProgress::Ready(b)) => parser.finish(b).ok(),
+        Ok(hardy_bpv7::parse::ParserProgress::Partial { consumed, .. }) => {
+            parser.finish(consumed).ok()
+        }
+        _ => None,
+    };
+
+    let (offset, length) = if let Some(parsed) = parsed_opt
+        && let Some(p_block) = parsed.bundle.blocks.get(&1)
+    {
+        let r = p_block.payload_range();
+        let len = r.end.saturating_sub(r.start);
+        (r.start, len)
+    } else {
+        (0, file_len)
+    };
+
+    // Sample up to 512 bytes of the payload body to infer MIME type
+    let mut sample_buf = [0u8; 512];
+    let sample_len = (length.min(512)) as usize;
+    let sample_n = if sample_len > 0 {
+        if file.seek(std::io::SeekFrom::Start(offset)).await.is_ok() {
+            file.read(&mut sample_buf[..sample_len]).await.unwrap_or(0)
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    let (mime, _) = infer_mime_type(&sample_buf[..sample_n]);
+
+    Ok(Some(BundlePayloadLocation {
+        path: payload_path,
+        offset,
+        length,
+        mime_type: mime,
+    }))
+}
+
+/// Fetches up to 64 KiB of raw payload bytes and its detected MIME type for a given bundle key.
+pub async fn get_bundle_payload(
+    db_path: &Path,
+    payload_dir: &Path,
+    bundle_key: &str,
+) -> anyhow::Result<Option<(Vec<u8>, &'static str)>> {
+    let Some(loc) = get_bundle_payload_location(db_path, payload_dir, bundle_key).await? else {
+        return Ok(None);
+    };
+
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let mut file = tokio::fs::File::open(&loc.path).await?;
+    let to_read = (loc.length.min(65536)) as usize;
+    let mut buf = vec![0u8; to_read];
+    file.seek(std::io::SeekFrom::Start(loc.offset)).await?;
+    let n = file.read(&mut buf).await?;
+    buf.truncate(n);
+    Ok(Some((buf, loc.mime_type)))
 }
 
 /// Retrieves detailed bundle metadata, MIME type, and formatted preview.
@@ -781,5 +861,14 @@ mod tests {
         assert!(dump.starts_with("00000000  48 65 6c 6c 6f 2c 20 44  54 4e 20 42 50 76 37 20"));
         assert!(dump.contains("|Hello, DTN BPv7 |"));
         assert!(dump.contains("00000010"));
+    }
+
+    #[tokio::test]
+    async fn test_bundle_payload_location_non_existent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let payload_dir = dir.path().join("payloads");
+        let res = get_bundle_payload_location(&db_path, &payload_dir, "non-existent-key").await;
+        assert!(res.unwrap().is_none());
     }
 }
