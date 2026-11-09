@@ -1,13 +1,12 @@
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { Navbar } from './components/Navbar';
-import { ConfigView, StationConfig, ActiveService } from './components/ConfigView';
-import { BundlesView } from './components/BundlesView';
+import { Navbar, NavTabId } from './components/Navbar';
+import { ConfigView, StationConfig, ActiveService, StationSubTab } from './components/ConfigView';
 import { SendBundleView } from './components/SendBundleView';
 import { ChatView, ChatMessage } from './components/ChatView';
 import { FilesView } from './components/FilesView';
 import { SenmlView } from './components/SenmlView';
-import { LogsView, LogRecord } from './components/LogsView';
+import { LogRecord } from './components/LogsView';
 import { playChime } from './utils/audio';
 import {
   getNotificationPermission,
@@ -26,14 +25,15 @@ import {
 } from './utils/pwa';
 
 function parseHash(hash: string): {
-  tab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs';
+  tab: NavTabId;
+  stationSubTab?: StationSubTab;
   fileId: string | null;
   destination: string | null;
 } {
   const clean = hash.replace(/^#\/?/, '');
   const [pathPart, queryPart] = clean.split('?');
   const segments = pathPart.split('/').filter(Boolean);
-  const head = segments[0] || 'config';
+  const head = segments[0] || 'station';
 
   let destination: string | null = null;
   if (queryPart) {
@@ -48,19 +48,25 @@ function parseHash(hash: string): {
     return { tab: 'files', fileId, destination };
   } else if (head === 'senml') {
     return { tab: 'senml', fileId: null, destination };
-  } else if (head === 'bundles') {
-    return { tab: 'bundles', fileId: null, destination };
   } else if (head === 'send') {
     return { tab: 'send', fileId: null, destination };
+  } else if (head === 'bundles') {
+    return { tab: 'station', stationSubTab: 'bundles', fileId: null, destination };
   } else if (head === 'logs') {
-    return { tab: 'logs', fileId: null, destination };
+    return { tab: 'station', stationSubTab: 'logs', fileId: null, destination };
+  } else if (head === 'station' || head === 'config') {
+    const validSubTabs: StationSubTab[] = ['radio', 'routes', 'security', 'bundles', 'logs', 'advanced'];
+    const sub = segments[1] as StationSubTab;
+    const stationSubTab: StationSubTab = validSubTabs.includes(sub) ? sub : 'radio';
+    return { tab: 'station', stationSubTab, fileId: null, destination };
   }
-  return { tab: 'config', fileId: null, destination };
+  return { tab: 'station', stationSubTab: 'radio', fileId: null, destination };
 }
 
 export function App() {
   const initialNav = parseHash(window.location.hash);
-  const [activeTab, setActiveTab] = useState<'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs'>(initialNav.tab);
+  const [activeTab, setActiveTab] = useState<NavTabId>(initialNav.tab);
+  const [stationSubTab, setStationSubTab] = useState<StationSubTab>(initialNav.stationSubTab || 'radio');
   const [selectedFileId, setSelectedFileId] = useState<string | null>(initialNav.fileId);
   const [sendDestination, setSendDestination] = useState<string | null>(initialNav.destination);
 
@@ -145,6 +151,9 @@ export function App() {
     const handleHashChange = () => {
       const nav = parseHash(window.location.hash);
       setActiveTab(nav.tab);
+      if (nav.stationSubTab) {
+        setStationSubTab(nav.stationSubTab);
+      }
       setSelectedFileId(nav.fileId);
       if (nav.destination) {
         setSendDestination(nav.destination);
@@ -155,14 +164,21 @@ export function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const navigateToTab = (tab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs') => {
+  const navigateToTab = (tab: NavTabId) => {
     setActiveTab(tab);
     if (tab === 'files') {
       window.location.hash = '#/files';
       setSelectedFileId(null);
+    } else if (tab === 'station') {
+      window.location.hash = stationSubTab ? `#/station/${stationSubTab}` : '#/station/radio';
     } else {
       window.location.hash = '#/' + tab;
     }
+  };
+
+  const handleStationSubTabChange = (subTab: StationSubTab) => {
+    setStationSubTab(subTab);
+    window.location.hash = `#/station/${subTab}`;
   };
 
   const handleSelectFile = (id: string | null) => {
@@ -435,13 +451,22 @@ export function App() {
 
       {/* Main content with bottom padding for mobile navigation bar */}
       <main id="main-content" class="flex-1 pb-20 md:pb-6" tabIndex={-1}>
-        {activeTab === 'config' ? (
+        {activeTab === 'station' ? (
           <ConfigView
             config={config}
             services={services}
             loading={loading}
             error={error}
             onRefresh={refreshAll}
+            activeSubTab={stationSubTab}
+            onSubTabChange={handleStationSubTabChange}
+            bundlesKey={bundlesKey}
+            onSendReply={(dest) => {
+              setSendDestination(dest);
+              navigateToTab('send');
+            }}
+            incomingLog={incomingLog}
+            sseStatus={sseStatus}
           />
         ) : activeTab === 'chat' ? (
           <ChatView
@@ -462,16 +487,6 @@ export function App() {
           />
         ) : activeTab === 'senml' ? (
           <SenmlView />
-        ) : activeTab === 'bundles' ? (
-          <BundlesView
-            key={bundlesKey}
-            onRefresh={refreshAll}
-          />
-        ) : activeTab === 'logs' ? (
-          <LogsView
-            incomingLog={incomingLog}
-            sseStatus={sseStatus}
-          />
         ) : (
           <SendBundleView
             stationNodeId={config?.node_id}

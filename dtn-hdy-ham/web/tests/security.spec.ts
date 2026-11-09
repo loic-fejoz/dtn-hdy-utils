@@ -110,10 +110,7 @@ test.describe('BPSec Security & Authentication (RFC 9103 / RFC 9172)', () => {
   });
 
   test('displays BPSec security card with directional key tables in Configuration', async ({ page }) => {
-    await page.goto('/');
-
-    // Navigate to Configuration tab
-    await page.click('button:has-text("Configuration"), a:has-text("Configuration")');
+    await page.goto('/#/station/security');
 
     // Check Security section title
     await expect(page.locator('text=Sécurité & Authentification BPSec')).toBeVisible();
@@ -128,8 +125,7 @@ test.describe('BPSec Security & Authentication (RFC 9103 / RFC 9172)', () => {
   });
 
   test('allows changing verification policy', async ({ page }) => {
-    await page.goto('/');
-    await page.click('button:has-text("Configuration"), a:has-text("Configuration")');
+    await page.goto('/#/station/security');
 
     const policySelect = page.locator('select').filter({ hasText: 'Avertissement' });
     await expect(policySelect).toBeVisible();
@@ -140,8 +136,7 @@ test.describe('BPSec Security & Authentication (RFC 9103 / RFC 9172)', () => {
   });
 
   test('allows adding a new outbound BPSec key with random generator', async ({ page }) => {
-    await page.goto('/');
-    await page.click('button:has-text("Configuration"), a:has-text("Configuration")');
+    await page.goto('/#/station/security');
 
     // Open Add Key form
     await page.click('button:has-text("+ Ajouter une clé")');

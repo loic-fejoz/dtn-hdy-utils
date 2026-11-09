@@ -1,9 +1,11 @@
 import { h } from 'preact';
 import { NotificationPermissionState } from '../utils/notifications';
 
+export type NavTabId = 'station' | 'chat' | 'files' | 'senml' | 'send';
+
 interface NavbarProps {
-  activeTab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs';
-  onTabChange: (tab: 'config' | 'chat' | 'files' | 'senml' | 'bundles' | 'send' | 'logs') => void;
+  activeTab: NavTabId | 'config' | 'bundles' | 'logs';
+  onTabChange: (tab: NavTabId) => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   soundEnabled: boolean;
@@ -39,14 +41,18 @@ export function Navbar({
   onInstall,
 }: NavbarProps) {
   const tabs = [
-    { id: 'config' as const, label: 'Configuration', shortLabel: 'Config', icon: '⚙️' },
+    { id: 'station' as const, label: 'Station', shortLabel: 'Station', icon: '⚙️' },
     { id: 'chat' as const, label: 'Chat', shortLabel: 'Chat', icon: '💬', count: unreadChatCount },
     { id: 'files' as const, label: 'Files', shortLabel: 'Files', icon: '📁', count: unreadFilesCount },
     { id: 'senml' as const, label: 'SenML', shortLabel: 'SenML', icon: '📊' },
-    { id: 'bundles' as const, label: 'Bundles', shortLabel: 'Bundles', icon: '📦' },
     { id: 'send' as const, label: 'Send Bundle', shortLabel: 'Send', icon: '✉️' },
-    { id: 'logs' as const, label: 'Logs', shortLabel: 'Logs', icon: '📟' },
   ];
+
+  const isTabActive = (tabId: NavTabId) => {
+    if (activeTab === tabId) return true;
+    if (tabId === 'station' && (activeTab === 'config' || activeTab === 'bundles' || activeTab === 'logs')) return true;
+    return false;
+  };
 
   return (
     <>
@@ -104,7 +110,7 @@ export function Navbar({
           {/* Desktop Navigation Tabs */}
           <nav aria-label="Main navigation" class="hidden md:flex items-center space-x-1 lg:space-x-2">
             {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
+              const isActive = isTabActive(tab.id);
               return (
                 <button
                   key={tab.id}
@@ -211,7 +217,7 @@ export function Navbar({
         class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 pb-[env(safe-area-inset-bottom)] shadow-lg flex items-center justify-around h-16"
       >
         {tabs.map((tab) => {
-          const isActive = activeTab === tab.id;
+          const isActive = isTabActive(tab.id);
           return (
             <button
               key={tab.id}

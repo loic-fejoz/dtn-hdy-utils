@@ -72,8 +72,8 @@ test.describe('PWA & Field Mobile Ergonomics', () => {
     const mobileNav = page.locator('nav[aria-label="Mobile navigation"]');
     await expect(mobileNav).toBeVisible();
 
-    // Verify all 6 tabs exist in mobile bottom bar
-    const tabLabels = ['Config', 'Chat', 'Files', 'Bundles', 'Send', 'Logs'];
+    // Verify all 5 tabs exist in mobile bottom bar
+    const tabLabels = ['Station', 'Chat', 'Files', 'SenML', 'Send'];
     for (const label of tabLabels) {
       const btn = mobileNav.getByRole('button', { name: label });
       await expect(btn).toBeVisible();
@@ -86,9 +86,9 @@ test.describe('PWA & Field Mobile Ergonomics', () => {
     await mobileNav.getByRole('button', { name: 'Chat' }).click();
     await expect(page).toHaveURL(/#\/chat/);
 
-    // Switch to Logs using bottom bar
-    await mobileNav.getByRole('button', { name: 'Logs' }).click();
-    await expect(page).toHaveURL(/#\/logs/);
+    // Switch to Send using bottom bar
+    await mobileNav.getByRole('button', { name: 'Send' }).click();
+    await expect(page).toHaveURL(/#\/send/);
   });
 
   test('toggles web notifications button in navbar and requests permission', async ({ page }) => {

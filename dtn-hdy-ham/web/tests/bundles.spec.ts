@@ -107,20 +107,19 @@ test.describe('Bundle Storage Inspector & Multi-Format Viewer', () => {
     await page.goto('/');
   });
 
-  test('displays correct navbar tabs order: Configuration -> Chat -> Files -> SenML -> Bundles -> Send Bundle -> Logs', async ({ page }) => {
+  test('displays correct navbar tabs order: Station -> Chat -> Files -> SenML -> Send Bundle', async ({ page }) => {
     const navButtons = page.locator('header nav button');
-    await expect(navButtons.nth(0)).toContainText('Configuration');
+    await expect(navButtons.nth(0)).toContainText('Station');
     await expect(navButtons.nth(1)).toContainText('Chat');
     await expect(navButtons.nth(2)).toContainText('Files');
     await expect(navButtons.nth(3)).toContainText('SenML');
-    await expect(navButtons.nth(4)).toContainText('Bundles');
-    await expect(navButtons.nth(5)).toContainText('Send Bundle');
-    await expect(navButtons.nth(6)).toContainText('Logs');
+    await expect(navButtons.nth(4)).toContainText('Send Bundle');
   });
 
   test('navigates to Bundles tab and renders bundle storage table', async ({ page }) => {
-    // Click Bundles tab
-    await page.locator('header nav button:has-text("Bundles")').click();
+    // Click Station then Bundles sub-tab
+    await page.locator('header nav button:has-text("Station")').click();
+    await page.locator('button:has-text("Stockage & Paquets")').click();
 
     // Check title
     await expect(page.locator('h1')).toContainText('Bundle Storage Inspector');
@@ -137,7 +136,7 @@ test.describe('Bundle Storage Inspector & Multi-Format Viewer', () => {
   });
 
   test('filters bundles using search input and status selector', async ({ page }) => {
-    await page.locator('header nav button:has-text("Bundles")').click();
+    await page.goto('/#/station/bundles');
 
     const searchInput = page.locator('input[placeholder*="Search by ID"]');
     await searchInput.fill('sensor');
@@ -152,7 +151,7 @@ test.describe('Bundle Storage Inspector & Multi-Format Viewer', () => {
   });
 
   test('opens inspector modal, views details and switches to hex dump', async ({ page }) => {
-    await page.locator('header nav button:has-text("Bundles")').click();
+    await page.goto('/#/station/bundles');
 
     // Click "Inspect" on the first bundle
     const inspectBtn = page.locator('button:has-text("🔍 Inspect")').first();
@@ -173,7 +172,7 @@ test.describe('Bundle Storage Inspector & Multi-Format Viewer', () => {
   });
 
   test('triggers bundle delete flow with confirmation modal', async ({ page }) => {
-    await page.locator('header nav button:has-text("Bundles")').click();
+    await page.goto('/#/station/bundles');
 
     // Click Delete on first bundle
     const deleteBtn = page.locator('button:has-text("🗑️")').first();

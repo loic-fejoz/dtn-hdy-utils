@@ -1,5 +1,9 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
+import { BundlesView } from './BundlesView';
+import { LogsView, LogRecord } from './LogsView';
+
+export type StationSubTab = 'radio' | 'routes' | 'security' | 'bundles' | 'logs' | 'advanced';
 
 export interface ActiveService {
   eid: string;
@@ -64,10 +68,43 @@ interface ConfigViewProps {
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
+  activeSubTab?: StationSubTab;
+  onSubTabChange?: (tab: StationSubTab) => void;
+  bundlesKey?: number;
+  onSendReply?: (destination: string) => void;
+  incomingLog?: LogRecord | null;
+  sseStatus?: 'connected' | 'disconnected' | 'connecting';
 }
 
-export function ConfigView({ config, services, loading, error, onRefresh }: ConfigViewProps) {
-  const [showRawJson, setShowRawJson] = useState(false);
+export function ConfigView({
+  config,
+  services,
+  loading,
+  error,
+  onRefresh,
+  activeSubTab,
+  onSubTabChange,
+  bundlesKey,
+  onSendReply,
+  incomingLog,
+  sseStatus,
+}: ConfigViewProps) {
+  const [internalSubTab, setInternalSubTab] = useState<StationSubTab>('radio');
+  const currentSubTab = activeSubTab || internalSubTab;
+
+  const handleSubTabSelect = (tab: StationSubTab) => {
+    setInternalSubTab(tab);
+    onSubTabChange?.(tab);
+  };
+
+  const SUB_TABS: { id: StationSubTab; label: string; icon: string }[] = [
+    { id: 'radio', label: 'Liaisons & Radio', icon: '📡' },
+    { id: 'routes', label: 'Routage (RIB)', icon: '🧭' },
+    { id: 'security', label: 'Sécurité BPSec', icon: '🛡️' },
+    { id: 'bundles', label: 'Stockage & Paquets', icon: '📦' },
+    { id: 'logs', label: 'Traces & Diagnostic', icon: '📟' },
+    { id: 'advanced', label: 'Configuration JSON', icon: '⚙️' },
+  ];
   const [connectingPeer, setConnectingPeer] = useState<string | null>(null);
   const [connectMessage, setConnectMessage] = useState<{
     success: boolean;
@@ -470,10 +507,16 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
         </div>
         <div class="flex items-center space-x-2">
           <button
-            onClick={() => setShowRawJson(!showRawJson)}
+            onClick={() => {
+              if (currentSubTab === 'advanced') {
+                handleSubTabSelect('radio');
+              } else {
+                handleSubTabSelect('advanced');
+              }
+            }}
             class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition cursor-pointer"
           >
-            {showRawJson ? 'Hide JSON' : 'View JSON'}
+            {currentSubTab === 'advanced' ? 'Hide JSON' : 'View JSON'}
           </button>
           <button
             onClick={() => {
@@ -490,15 +533,36 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
         </div>
       </div>
 
-      {/* Raw JSON collapse */}
-      {showRawJson && (
-        <div class="bg-slate-900 text-slate-100 p-4 rounded-2xl overflow-x-auto text-xs font-mono border border-slate-700 shadow-inner">
-          <pre>{JSON.stringify(config, null, 2)}</pre>
-        </div>
-      )}
+      {/* Sub-navigation Segmented Bar */}
+      <nav
+        aria-label="Station management sub-navigation"
+        class="flex items-center overflow-x-auto no-scrollbar gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700"
+      >
+        {SUB_TABS.map((tab) => {
+          const isActive = currentSubTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => handleSubTabSelect(tab.id)}
+              class={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-2 transition cursor-pointer min-h-[40px] ${
+                isActive
+                  ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-xs border border-slate-200/80 dark:border-slate-700'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-white/60 dark:hover:bg-slate-700/50'
+              }`}
+            >
+              <span class="text-base">{tab.icon}</span>
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
-      {/* Top 3 Cards Grid */}
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* SUB-TAB 1: LIAISONS & RADIO */}
+      {currentSubTab === 'radio' && (
+        <>
+          {/* Top 3 Cards Grid */}
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Card 1: Identity */}
         <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
           <div>
@@ -761,8 +825,11 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
           </div>
         )}
       </div>
+      </>
+      )}
 
-      {/* Dynamic Static Routes Card */}
+      {/* SUB-TAB 2: ROUTAGE (RIB) */}
+      {currentSubTab === 'routes' && (
       <div class="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
         <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-4 mb-4">
           <div class="flex items-center space-x-2">
@@ -937,10 +1004,10 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
           </div>
         )}
       </div>
+      )}
 
-      {/* =========================================================================
-          SECTION: BPSEC AUTHENTICATION & KEYSTORE (RFC 9103 / RFC 9172)
-          ========================================================================= */}
+      {/* SUB-TAB 3: SÉCURITÉ BPSEC (RFC 9103 / RFC 9172) */}
+      {currentSubTab === 'security' && (
       <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xs border border-slate-200 dark:border-slate-700">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-700 gap-3">
           <div class="flex items-center space-x-2">
@@ -1280,6 +1347,44 @@ export function ConfigView({ config, services, loading, error, onRefresh }: Conf
           </div>
         </div>
       </div>
+      )}
+
+      {/* SUB-TAB 4: BUNDLES (STOCKAGE & PAQUETS) */}
+      {currentSubTab === 'bundles' && (
+        <BundlesView key={bundlesKey} onRefresh={onRefresh} />
+      )}
+
+      {/* SUB-TAB 5: LOGS (TRACES & DIAGNOSTIC) */}
+      {currentSubTab === 'logs' && (
+        <LogsView incomingLog={incomingLog || null} sseStatus={sseStatus || 'disconnected'} />
+      )}
+
+      {/* SUB-TAB 6: CONFIGURATION JSON AVANCÉE */}
+      {currentSubTab === 'advanced' && (
+        <div class="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+            <div class="flex items-center space-x-2">
+              <span class="text-lg">⚙️</span>
+              <h3 class="text-base font-bold text-slate-900 dark:text-white">
+                Configuration JSON de la station
+              </h3>
+            </div>
+            <button
+              onClick={() => {
+                if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                  navigator.clipboard.writeText(JSON.stringify(config, null, 2));
+                }
+              }}
+              class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 transition cursor-pointer"
+            >
+              📋 Copier le JSON
+            </button>
+          </div>
+          <div class="bg-slate-900 text-slate-100 p-4 rounded-xl overflow-x-auto text-xs font-mono border border-slate-700 shadow-inner">
+            <pre>{JSON.stringify(config, null, 2)}</pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

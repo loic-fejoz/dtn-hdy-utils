@@ -140,7 +140,8 @@ test.describe('Station Overview & Identity', () => {
     await expect(page.getByText('tcp-f4jxq', { exact: true })).toBeVisible();
     await expect(page.getByText('mercury-kiss', { exact: true })).toBeVisible();
 
-    // Check routes are listed
+    // Check routes are listed in Routage sub-tab
+    await page.getByRole('button', { name: /Routage/i }).click();
     await expect(page.getByText('dtn://f4jxq/*', { exact: true })).toBeVisible();
     await expect(page.getByText('dtn://*', { exact: true })).toBeVisible();
   });
@@ -227,6 +228,9 @@ test.describe('Station Overview & Identity', () => {
     // Check connected status badge is displayed
     await expect(page.getByText('connected', { exact: true })).toBeVisible();
 
+    // Switch to Routage sub-tab
+    await page.getByRole('button', { name: /Routage/i }).click();
+
     // Click "+ Add Route" button
     await page.getByRole('button', { name: '+ Add Route' }).click();
 
@@ -254,5 +258,68 @@ test.describe('Station Overview & Identity', () => {
 
     await expect(page.getByText('Error loading configuration')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  });
+
+  test('navigates across all 6 station sub-tabs via segmented navigation bar', async ({ page }) => {
+    // Route for Bundles view when embedded
+    await page.route('**/api/v1/bundles*', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+    });
+    // Route for Logs view when embedded
+    await page.route('/api/v1/logs', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ logs: [], count: 0, capacity: 500 }) });
+    });
+
+    await page.goto('/');
+
+    const subNav = page.locator('nav[aria-label="Station management sub-navigation"]');
+    await expect(subNav).toBeVisible();
+
+    // 1. Radio (default)
+    await expect(page.getByText('Radio Identity')).toBeVisible();
+
+    // 2. Routage (RIB)
+    await subNav.getByRole('button', { name: /Routage/i }).click();
+    await expect(page.getByRole('heading', { name: 'Static Routes' })).toBeVisible();
+
+    // 3. Sécurité BPSec
+    await subNav.getByRole('button', { name: /Sécurité/i }).click();
+    await expect(page.getByText('Sécurité & Authentification BPSec')).toBeVisible();
+
+    // 4. Stockage & Paquets (Bundles)
+    await subNav.getByRole('button', { name: /Stockage/i }).click();
+    await expect(page.locator('h1')).toContainText('Bundle Storage Inspector');
+
+    // 5. Traces & Diagnostic (Logs)
+    await subNav.getByRole('button', { name: /Traces/i }).click();
+    await expect(page.getByRole('heading', { name: /System Log Console/i })).toBeVisible();
+
+    // 6. Configuration JSON
+    await subNav.getByRole('button', { name: /JSON/i }).click();
+    await expect(page.getByRole('heading', { name: 'Configuration JSON de la station' })).toBeVisible();
+    await expect(page.locator('pre')).toBeVisible();
+  });
+
+  test('deep-links to station sub-tabs and handles backward-compatible aliases', async ({ page }) => {
+    // Route for Bundles view when embedded
+    await page.route('**/api/v1/bundles*', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+    });
+    // Route for Logs view when embedded
+    await page.route('/api/v1/logs', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ logs: [], count: 0, capacity: 500 }) });
+    });
+
+    // Test direct deep link to routes
+    await page.goto('/#/station/routes');
+    await expect(page.getByRole('heading', { name: 'Static Routes' })).toBeVisible();
+
+    // Test backward-compatible alias #/bundles -> Station / Bundles
+    await page.goto('/#/bundles');
+    await expect(page.locator('h1')).toContainText('Bundle Storage Inspector');
+
+    // Test backward-compatible alias #/logs -> Station / Logs
+    await page.goto('/#/logs');
+    await expect(page.getByRole('heading', { name: /System Log Console/i })).toBeVisible();
   });
 });
