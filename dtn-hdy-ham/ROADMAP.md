@@ -25,13 +25,13 @@ By combining `dtn-hdy-ham`'s high-performance in-process Rust BPA (`hardy`), its
 | **Chat Service** | Conversational bubble thread grouped by peer | **Delivered (WP3)**: Conversational thread UI, chat bubbles, unread tracking, persistent DB | Complete parity with mobile app (ADR 0012) |
 | **Files Service & Retention** | File explorer & sticky retention | **Delivered**: Built-in files service (`/files`), sticky flag, metadata DB, auto-cleanup | Complete parity with mobile app (ADR 0013) |
 | **Voice Notes & Audio Recording** | Native Opus audio recorder | **Delivered (WP7)**: In-browser Web Audio mic recorder + Ogg/Opus auto-remux | Complete parity with mobile app |
-| **Real-Time Push / Updates** | Reactive Room DB Kotlin Flows | Manual refresh / polling required | **WP4**: WebSocket / Server-Sent Events (SSE) for live event streaming |
-| **System Event Logs** | Dedicated `SystemLogScreen` | Terminal logs only | **WP4**: Web-based real-time log viewer with filter & search |
-| **SenML Telemetry** | `SENML_LAST` cards & `SENML_GRAPH` time series | None | **WP5**: RFC 8428 SenML decoder, sensor card dashboard & historical charts |
-| **Service Registry** | Dynamic registration of local EIDs & Viewer Types | Static YAML config + Service Tracker | **WP6**: Register/deregister services with UI viewer binding |
-| **Static Routing** | Rule editor in settings | Static YAML config only | **Phase 3ter**: In-browser Route Manager, immediate hot-reload, auto-peering routes |
-| **BPSec Security** | BIB key management & verification policy | YAML config only | **Phase 6**: BIB key vault & HMAC verification policy |
-| **Mobile & Field Ergonomics** | Native Android APK | Web responsive layout + mic recording | **WP7**: Progressive Web App (PWA) offline install & touch layout |
+| **Real-Time Push / Updates** | Reactive Room DB Kotlin Flows | **Delivered (WP4 / ADR 0018)**: Server-Sent Events (SSE) `/api/v1/events` for bundles, chat, files, CLA states & logs | Complete parity with mobile app |
+| **System Event Logs** | Dedicated `SystemLogScreen` | **Delivered (WP4 / ADR 0018)**: 500-entry ring buffer, `/logs` view with level filters, search, auto-scroll & export | Complete parity with mobile app |
+| **SenML Telemetry** | `SENML_LAST` cards & `SENML_GRAPH` time series | **Delivered (WP5 / ADR 0021)**: RFC 8428 CBOR/JSON parser, `senml.db` storage, Open MCT API, live stream, responsive cards | Complete parity with mobile app |
+| **Service Registry** | Dynamic registration of local EIDs & Viewer Types | **Delivered (Read-only)**: `/api/v1/services` active service discovery & SSE push | WP6: Add interactive in-browser registration |
+| **Static Routing** | Rule editor in settings | **Delivered (Phase 3ter / ADR 0014)**: Dynamic Route Manager `/api/v1/routes`, immediate RIB push & hot-reload | Complete parity with mobile app |
+| **BPSec Security** | BIB key management & verification policy | **Delivered (Phase 6 & 6bis / ADR 0020)**: Key vault (`keystore.toml`), HMAC-SHA256 policy, deterministic specificity, real crypto verification, atomic 0600 storage | Complete parity with mobile app |
+| **Mobile & Field Ergonomics** | Native Android APK | **Delivered (WP7)**: Progressive Web App (PWA) offline shell, in-browser voice recorder + Ogg remux, mobile bottom navbar ($\ge 48\text{px}$) | Complete parity with mobile app |
 
 ---
 
@@ -464,13 +464,13 @@ flowchart TD
    * Synchronized time-division multiple access using system clock (NTP / GPS time).
    * Even/odd second or configurable slot allocation (e.g., Station A transmits in slot $0 \le t < T$, Station B in slot $T \le t < 2T$).
    * CLA outbound buffer holdoff: queue outgoing LTP frames in memory and transmit them in bursts exclusively during the station's assigned TX slot.
-2. **Half-Duplex Ping-Pong / Turnaround Guard State Machine**:
-   * Turn-based MAC for non-time-synchronized simplex links: sender transmits up to a Checkpoint, then explicitly releases PTT and enters listening state.
-   * Configurable turnaround delay margin (*PTT keyup/tail guard time*) before receiver replies with Report Segments.
+2. [x] **Half-Duplex Ping-Pong / Turnaround Guard State Machine (Delivered in `hardy-ltp-cla`)**:
+   * Turn-based MAC for non-time-synchronized simplex links: sender transmits up to a Checkpoint, then explicitly releases PTT and enters listening state (`HalfDuplexPacer`).
+   * Configurable turnaround delay margin (*PTT keyup/tail guard time*) before receiver replies with Report Segments (`WaitForReport`, `FixedDwell`).
 3. **KISS TNC CSMA Parameters Management**:
    * Expose KISS parameters (`TXDELAY`, `PERSIST`, `SLOTTIME`, `TXTAIL`) in CLA YAML configuration to fine-tune Direwolf / hardware TNC p-persistent CSMA.
-4. **Unidirectional Simplex Profile (LTP Green Data / HQFBP)**:
-   * Optimized configuration profiles for strictly unidirectional simplex channels (e.g., telemetry broadcast, weather bulletins, emergency multicast) using LTP Lane 1 (Green Data) or HQFBP, guaranteeing zero return transmissions and zero collisions.
+4. [x] **Unidirectional Simplex Profile (LTP Green Data / HQFBP) (Delivered)**:
+   * Optimized configuration profiles for strictly unidirectional simplex channels using LTP Lane 1 (Green Data in `hardy-ltp`) and dedicated `hardy-hqfbp-cla` broadcast adapter, guaranteeing zero return transmissions and zero collisions.
 
 ---
 
@@ -502,6 +502,16 @@ flowchart TD
   * Intégration de la couverture source native LLVM (`cargo-llvm-cov`) via le script unifié `scripts/check-coverage.sh` (console, HTML et export LCOV).
   * Mesure globale sur l'ensemble du workspace (>65% couverture globale, >90% sur `ltp`, `pacing`, `keystore`, et parsers SenML).
   * Job automatisé `code-coverage` dans GitHub Actions (`.github/workflows/ci.yml`) avec génération d'artéfact LCOV.
+* [x] **Garde-fous Zéro-Panic et Zéro-Unwrap (Clippy & Linter)** :
+  * Interdiction stricte de `.unwrap()` et `panic!()` dans le code de production (`--lib`, `--bins`).
+  * Encodage `clippy::unwrap_used` et `clippy::panic` en erreur bloquante et vérification dans l'étape `[2/6]` de `check-security.sh`.
+* [x] **Hook Git Pre-Commit Automatisé (`scripts/install-hooks.sh`)** :
+  * Installation de `.git/hooks/pre-commit` bloquant localement tout commit non conforme aux 6 étapes de sécurité.
+* [x] **Tests Fuzzing Continus (Continuous Fuzz Smoke Testing)** :
+  * Cibles `cargo-fuzz` sur le décodage LTP et le parsing de trames HQFBP (`segment_decode`, `sdnv_kiss`, `parse_frame`).
+  * Job automatisé `fuzz-smoke-tests` dans GitHub Actions CI.
+* [x] **Mutation Testing & Robustesse des Tests (`cargo-mutants`)** :
+  * Exécution de `cargo-mutants` sur `cla-commons` avec 100% de neutralisation des mutants (24 tués, 3 timeouts, 0 manqués).
 
 ##### Priorité 3 : Analyse sémantique avancée (SAST) & Sécurité mémoire
 * [ ] **Analyse statique approfondie (GitHub CodeQL / Semgrep)** :
