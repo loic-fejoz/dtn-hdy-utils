@@ -224,10 +224,10 @@ pub fn infer_mime_type(data: &[u8]) -> (&'static str, bool) {
                 return ("application/senml+json", false);
             }
 
-            if let Some(t) = val.get("type").and_then(|t| t.as_str()) {
-                if t == "FeatureCollection" || t == "Feature" || t == "GeometryCollection" {
-                    return ("application/geo+json", false);
-                }
+            if let Some(t) = val.get("type").and_then(|t| t.as_str())
+                && (t == "FeatureCollection" || t == "Feature" || t == "GeometryCollection")
+            {
+                return ("application/geo+json", false);
             }
 
             return ("application/json", false);

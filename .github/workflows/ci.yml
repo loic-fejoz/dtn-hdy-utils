@@ -10,6 +10,9 @@ on:
 permissions:
   contents: write
 
+env:
+  GIT_CONFIG_PARAMETERS: "'init.defaultBranch=main'"
+
 jobs:
   build-test-lint:
     name: Build, Test & Lint
@@ -17,19 +20,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout dtn-hdy-utils
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: dtn-hdy-utils
 
       - name: Checkout hardy dependency
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ricktaylor/hardy
           path: hardy
           ref: '260fe751a0d8058d3a438d3b588bc05502bd1727'
 
       - name: Checkout hqfbp-rs dependency
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: loic-fejoz/hqfbp-rs
           path: hqfbp-rs
@@ -49,15 +52,15 @@ jobs:
           workspaces: dtn-hdy-utils -> target
 
       - name: Format Check
-        run: cargo fmt --all --check
+        run: cargo fmt --check
         working-directory: dtn-hdy-utils
 
       - name: Clippy Lint
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         working-directory: dtn-hdy-utils
 
       - name: Run Tests
-        run: cargo test --all-targets
+        run: cargo test --workspace --all-targets
         working-directory: dtn-hdy-utils
 
       - name: Generate SPDX SBOM
@@ -67,6 +70,7 @@ jobs:
           path: dtn-hdy-utils
           format: spdx-json
           output-file: sbom.spdx.json
+          config: dtn-hdy-utils/.syft.yaml
 
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0
@@ -75,9 +79,10 @@ jobs:
           path: dtn-hdy-utils
           format: cyclonedx-json
           output-file: sbom.cdx.json
+          config: dtn-hdy-utils/.syft.yaml
 
       - name: Upload SBOM Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sbom-artifacts

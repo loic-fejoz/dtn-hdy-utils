@@ -348,10 +348,12 @@ impl BpaService for StatsApp {
 
 async fn tail_file(path: PathBuf, tx: tokio::sync::mpsc::Sender<String>) {
     let mut offset = 0;
+    #[cfg(unix)]
     let mut last_inode = 0;
     loop {
         let path_clone = path.clone();
         let current_offset = offset;
+        #[cfg(unix)]
         let current_inode = last_inode;
 
         let result = tokio::task::spawn_blocking(move || -> Result<(Vec<String>, u64, u64), ()> {
@@ -403,7 +405,12 @@ async fn tail_file(path: PathBuf, tx: tokio::sync::mpsc::Sender<String>) {
         match result {
             Ok(Ok((lines, new_offset, inode))) => {
                 offset = new_offset;
-                last_inode = inode;
+                #[cfg(unix)]
+                {
+                    last_inode = inode;
+                }
+                #[cfg(not(unix))]
+                let _ = inode;
                 for line in lines {
                     if tx.send(line).await.is_err() {
                         return; // receiver dropped

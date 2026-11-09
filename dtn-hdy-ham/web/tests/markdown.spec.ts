@@ -56,3 +56,77 @@ test.describe('Markdown Link & URL rendering', () => {
     expect(isSafeLinkUrl('vbscript:msgbox')).toBe(false);
   });
 });
+
+test.describe('Markdown Checklist & Task List rendering', () => {
+  test('renders unchecked checklist item (- [ ])', () => {
+    const input = '- [ ] Deploy station coordinator';
+    const output = renderMarkdown(input);
+    expect(output).toContain('<input type="checkbox" disabled');
+    expect(output).not.toContain('checked disabled');
+    expect(output).toContain('<span>Deploy station coordinator</span>');
+    expect(output).toContain('list-none');
+  });
+
+  test('renders checked checklist items with - [x] and - [X]', () => {
+    const inputLower = '- [x] Configure VHF TNC';
+    const outputLower = renderMarkdown(inputLower);
+    expect(outputLower).toContain('<input type="checkbox" checked disabled');
+    expect(outputLower).toContain('<span class="line-through text-slate-400 dark:text-slate-500">Configure VHF TNC</span>');
+
+    const inputUpper = '- [X] Calibrate antenna match';
+    const outputUpper = renderMarkdown(inputUpper);
+    expect(outputUpper).toContain('<input type="checkbox" checked disabled');
+    expect(outputUpper).toContain('<span class="line-through text-slate-400 dark:text-slate-500">Calibrate antenna match</span>');
+  });
+
+  test('supports bullet variants (* [ ], + [X], and numbered 1. [ ])', () => {
+    const outputStar = renderMarkdown('* [ ] Star unchecked');
+    expect(outputStar).toContain('<input type="checkbox" disabled');
+    expect(outputStar).not.toContain('checked disabled');
+    expect(outputStar).toContain('<span>Star unchecked</span>');
+
+    const outputPlus = renderMarkdown('+ [X] Plus checked');
+    expect(outputPlus).toContain('<input type="checkbox" checked disabled');
+    expect(outputPlus).toContain('line-through');
+
+    const outputNum = renderMarkdown('1. [ ] Numbered task');
+    expect(outputNum).toContain('<input type="checkbox" disabled');
+    expect(outputNum).toContain('<span>Numbered task</span>');
+  });
+
+  test('supports checkmark symbol variants (- [v], - [+], - [-])', () => {
+    const outputV = renderMarkdown('- [v] Validated with v');
+    expect(outputV).toContain('<input type="checkbox" checked disabled');
+    expect(outputV).toContain('Validated with v');
+
+    const outputPlusMark = renderMarkdown('- [+] Validated with plus');
+    expect(outputPlusMark).toContain('<input type="checkbox" checked disabled');
+
+    const outputCancelled = renderMarkdown('- [-] Cancelled objective');
+    expect(outputCancelled).toContain('<input type="checkbox" disabled');
+    expect(outputCancelled).toContain('line-through');
+    expect(outputCancelled).toContain('Cancelled objective');
+  });
+
+  test('renders indented sub-checklists with increased margin', () => {
+    const input = '- [ ] Main task\n  - [ ] Sub-task indented';
+    const output = renderMarkdown(input);
+    expect(output).toContain('ml-4 list-none');
+    expect(output).toContain('ml-8 list-none');
+  });
+
+  test('renders checklist items containing links and inline code', () => {
+    const input = '- [ ] Review [dtnprint](src/bin/dtnprint.rs): using `dtnprint -b`';
+    const output = renderMarkdown(input);
+    expect(output).toContain('<input type="checkbox" disabled');
+    expect(output).toContain('<a href="src/bin/dtnprint.rs" target="_blank" rel="noopener noreferrer" class="text-emerald-600 dark:text-emerald-400 underline hover:opacity-85">dtnprint</a>:');
+    expect(output).toContain('<code class="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded text-xs font-mono">dtnprint -b</code>');
+  });
+
+  test('preserves standard bullet lists without checkbox', () => {
+    const input = '- Standard bullet item without checklist';
+    const output = renderMarkdown(input);
+    expect(output).toContain('<li class="ml-4 list-disc">Standard bullet item without checklist</li>');
+    expect(output).not.toContain('<input type="checkbox"');
+  });
+});

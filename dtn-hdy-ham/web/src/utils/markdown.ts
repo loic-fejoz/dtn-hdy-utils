@@ -152,13 +152,43 @@ export function renderMarkdown(content: string, options: { allowImages?: boolean
     }
   );
 
-  // 9. Bullet lists
+  // 9. Checklists / Task lists (GFM & variants: - [ ], - [x], - [X], * [ ], + [x], 1. [ ], etc.)
+  formatted = formatted.replace(
+    /^([ \t]*)(?:[-*+]|\d+\.)\s*\[([ xXvV+*\-]*)\]\s*(.*$)/gm,
+    (_match, indent, mark, text) => {
+      const margin = indent.length >= 2 ? 'ml-8' : 'ml-4';
+      const cleanMark = mark.trim().toLowerCase();
+      const isChecked = ['x', 'v', '+', '*'].includes(cleanMark);
+      const isCancelled = cleanMark === '-';
+
+      let textSpan = '';
+      let checkboxAttr = '';
+
+      if (isChecked) {
+        checkboxAttr = 'checked disabled';
+        textSpan = `<span class="line-through text-slate-400 dark:text-slate-500">${text}</span>`;
+      } else if (isCancelled) {
+        checkboxAttr = 'disabled';
+        textSpan = `<span class="line-through text-slate-400 dark:text-slate-500 opacity-75">${text}</span>`;
+      } else {
+        checkboxAttr = 'disabled';
+        textSpan = `<span>${text}</span>`;
+      }
+
+      return `<li class="${margin} list-none flex items-center space-x-2 my-1 text-slate-800 dark:text-slate-200"><input type="checkbox" ${checkboxAttr} class="rounded border-slate-300 dark:border-slate-600 text-emerald-600 focus:ring-0 cursor-default h-3.5 w-3.5" />${textSpan}</li>`;
+    }
+  );
+
+  // 10. Bullet lists
   formatted = formatted.replace(/^[-*+] (.*$)/gm, '<li class="ml-4 list-disc">$1</li>');
 
-  // 10. Line breaks
+  // Avoid extra line breaks between list items and block elements
+  formatted = formatted.replace(/(<\/(?:li|pre|h[1-3])>)\n/g, '$1');
+
+  // 11. Line breaks
   formatted = formatted.replace(/\n/g, '<br/>');
 
-  // 11. Restore placeholders in reverse order
+  // 12. Restore placeholders in reverse order
   for (let i = placeholders.length - 1; i >= 0; i--) {
     const item = placeholders[i];
     formatted = formatted.replaceAll(item.token, item.html);
