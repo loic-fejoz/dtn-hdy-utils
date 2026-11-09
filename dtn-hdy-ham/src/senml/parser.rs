@@ -56,10 +56,18 @@ pub fn parse_senml_payload(
 fn calculate_time_ms(time_sec: f64, fallback_timestamp_ms: i64) -> i64 {
     // RFC 8428 Section 4.5.3: Values > 2**28 (~1978) represent absolute seconds since 1970 UTC.
     // Values <= 2**28 represent relative seconds from base time / current time.
+    if !time_sec.is_finite() {
+        return fallback_timestamp_ms;
+    }
+    let delta = (time_sec * 1000.0).round();
+    if !delta.is_finite() || delta > (i64::MAX as f64) || delta < (i64::MIN as f64) {
+        return fallback_timestamp_ms;
+    }
+    let delta_ms = delta as i64;
     if time_sec > 268_435_456.0 {
-        (time_sec * 1000.0).round() as i64
+        delta_ms
     } else {
-        fallback_timestamp_ms + (time_sec * 1000.0).round() as i64
+        fallback_timestamp_ms.saturating_add(delta_ms)
     }
 }
 
@@ -375,5 +383,19 @@ mod tests {
         assert_eq!(records[0].unit.as_deref(), Some("A"));
         assert_eq!(records[0].value, Some(4.8));
         assert_eq!(records[0].timestamp_ms, 1731000050000);
+    }
+
+    #[test]
+    fn test_calculate_time_ms_resilience() {
+        let fallback = 1_700_000_000_000;
+        assert_eq!(calculate_time_ms(f64::NAN, fallback), fallback);
+        assert_eq!(calculate_time_ms(f64::INFINITY, fallback), fallback);
+        assert_eq!(calculate_time_ms(f64::NEG_INFINITY, fallback), fallback);
+        assert_eq!(calculate_time_ms(f64::MAX, fallback), fallback);
+        assert_eq!(calculate_time_ms(10.0, fallback), fallback + 10_000);
+        assert_eq!(
+            calculate_time_ms(1_731_000_000.0, fallback),
+            1_731_000_000_000
+        );
     }
 }

@@ -11,7 +11,7 @@ fn default_node_id() -> String {
 }
 
 fn default_grpc_addr() -> SocketAddr {
-    "[::]:50051".parse().expect("valid address")
+    SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 50051))
 }
 
 /// Root configuration structure for `dtn-hdy-ham`.
@@ -289,7 +289,7 @@ impl Default for GrpcConfig {
 }
 
 fn default_web_addr() -> SocketAddr {
-    "127.0.0.1:8088".parse().expect("valid address")
+    SocketAddr::from(([127, 0, 0, 1], 8088))
 }
 
 pub fn default_web_static_dir() -> PathBuf {

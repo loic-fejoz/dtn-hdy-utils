@@ -75,11 +75,11 @@ pub struct Tcpclv4HamConfig {
 }
 
 fn default_mercury_control() -> SocketAddr {
-    "127.0.0.1:8300".parse().expect("valid address")
+    SocketAddr::from(([127, 0, 0, 1], 8300))
 }
 
 fn default_mercury_data() -> SocketAddr {
-    "127.0.0.1:8301".parse().expect("valid address")
+    SocketAddr::from(([127, 0, 0, 1], 8301))
 }
 
 fn default_bandwidth() -> u32 {

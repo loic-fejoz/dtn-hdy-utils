@@ -34,6 +34,7 @@ pub enum Error {
 /// Computes the number of octets required for the canonical encoding of `v`.
 ///
 /// Returns a value in `1..=10`.
+#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 #[must_use]
 pub fn encoded_len(v: u64) -> usize {
     let bits = 64 - (v | 1).leading_zeros() as usize;
@@ -43,6 +44,7 @@ pub fn encoded_len(v: u64) -> usize {
 /// Encodes `v` into a stack-allocated buffer without any heap allocations.
 ///
 /// Returns the fixed array and the exact number of bytes written (`1..=10`).
+#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 #[must_use]
 pub fn encode_to_array(v: u64) -> ([u8; MAX_LEN], usize) {
     if v < 0x80 {
@@ -77,6 +79,7 @@ pub fn encode(v: u64, out: &mut Vec<u8>) {
 /// Returns [`Error::Truncated`] if `input` ends before the terminal octet.
 /// Returns [`Error::Overflow`] if the value exceeds `u64` or requires more
 /// than [`MAX_LEN`] octets.
+#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 pub fn decode(input: &[u8]) -> Result<(u64, usize)> {
     if let Some(&first) = input.first()
         && first & 0x80 == 0

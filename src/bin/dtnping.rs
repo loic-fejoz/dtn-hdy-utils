@@ -626,7 +626,10 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("Pinging {} from {}", destination_eid, registered_eid);
     }
 
-    let sink = app.sink.get().expect("Sink not set on registration");
+    let sink = app
+        .sink
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Sink not set on registration"))?;
 
     let count = args.count.unwrap_or(u32::MAX);
     let mut seq = 0;

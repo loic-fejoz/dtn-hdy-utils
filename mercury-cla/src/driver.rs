@@ -465,7 +465,11 @@ impl Driver {
                 .entry(peer.clone())
                 .or_insert_with(|| {
                     let uri = format!("dtn://{}/", peer.to_lowercase());
-                    uri.parse().expect("valid node EID")
+                    uri.parse().unwrap_or_else(|_| {
+                        hardy_bpv7::eid::NodeId::Dtn(hardy_bpv7::eid::DtnNodeId {
+                            node_name: peer.to_lowercase().into_boxed_str(),
+                        })
+                    })
                 })
                 .clone();
 

@@ -462,7 +462,7 @@ storage:
                 assert_eq!(db_dir, std::path::PathBuf::from("/tmp/my-db-dir"));
                 assert_eq!(db_name, "test.db");
             }
-            _ => panic!("Expected Sqlite metadata config"),
+            _ => assert!(false, "Expected Sqlite metadata config"),
         }
     }
 
@@ -479,7 +479,7 @@ storage:
             MetadataConfig::Postgres { database_url } => {
                 assert_eq!(database_url, "postgres://localhost/db");
             }
-            _ => panic!("Expected Postgres metadata config"),
+            _ => assert!(false, "Expected Postgres metadata config"),
         }
     }
 
@@ -491,10 +491,10 @@ storage:
     type: memory
 "#;
         let config = test_load_config(yaml, "test_memory_config.yaml");
-        match config.storage.metadata {
-            MetadataConfig::Memory => {}
-            _ => panic!("Expected Memory metadata config"),
-        }
+        assert!(
+            matches!(config.storage.metadata, MetadataConfig::Memory),
+            "Expected Memory metadata config"
+        );
     }
 
     #[test]

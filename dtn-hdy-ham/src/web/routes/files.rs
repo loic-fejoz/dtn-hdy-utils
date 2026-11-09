@@ -8,7 +8,7 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::info;
 
 /// Helper for Axum 500 responses.
 fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<serde_json::Value>) {
@@ -113,26 +113,19 @@ pub async fn download_file_payload(
             .into_response();
     }
 
-    let bytes = match tokio::fs::read(p).await {
-        Ok(b) => bytes::Bytes::from(b),
-        Err(e) => {
-            error!("Failed to read payload file {}: {}", p.display(), e);
-            return internal_error(e).into_response();
-        }
-    };
-
     let filename = p
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("dtn_payload.bin");
 
-    super::serve_payload_with_range(
-        bytes,
+    super::serve_payload_file_with_range(
+        p,
         &record.mime_type,
         filename,
         query.download.unwrap_or(false),
         &req_headers,
     )
+    .await
 }
 
 /// POST /api/v1/files/{id}/sticky - Toggles the sticky retention flag for a file bundle.

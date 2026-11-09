@@ -8,7 +8,7 @@ use hardy_bpv7::eid::NodeId;
 use hardy_ltp::types::EngineId;
 
 fn default_udp_bind() -> SocketAddr {
-    "0.0.0.0:1113".parse().expect("valid socket addr")
+    SocketAddr::from(([0, 0, 0, 0], 1113))
 }
 
 const fn default_mtu() -> usize {

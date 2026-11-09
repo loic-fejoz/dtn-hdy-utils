@@ -7,11 +7,11 @@ use hardy_bpv7::eid::NodeId;
 use serde::{Deserialize, Serialize};
 
 fn default_control_addr() -> SocketAddr {
-    "127.0.0.1:8300".parse().expect("valid address")
+    SocketAddr::from(([127, 0, 0, 1], 8300))
 }
 
 fn default_data_addr() -> SocketAddr {
-    "127.0.0.1:8301".parse().expect("valid address")
+    SocketAddr::from(([127, 0, 0, 1], 8301))
 }
 
 fn default_bandwidth() -> u32 {
@@ -50,7 +50,11 @@ impl PeerEntry {
             nid.clone()
         } else {
             let uri = format!("dtn://{}/", self.callsign.to_lowercase());
-            uri.parse().expect("valid node EID")
+            uri.parse().unwrap_or_else(|_| {
+                NodeId::Dtn(hardy_bpv7::eid::DtnNodeId {
+                    node_name: self.callsign.to_lowercase().into_boxed_str(),
+                })
+            })
         }
     }
 }

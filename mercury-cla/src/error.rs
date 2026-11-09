@@ -33,6 +33,9 @@ pub enum Error {
     #[error("Session busy")]
     Busy,
 
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+
     #[error("Bundle buffer error: {0}")]
     Buffer(#[from] hardy_bpa::stream::BufferError),
 

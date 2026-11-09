@@ -62,7 +62,8 @@ impl MercuryCla {
                 nid
             } else {
                 let uri = format!("dtn://{}/", callsign.to_lowercase());
-                uri.parse().expect("valid node EID")
+                uri.parse()
+                    .map_err(|e| Error::InvalidConfig(format!("Invalid node EID: {e}")))?
             };
             (inner.cmd_tx.clone(), effective_node_id)
         };
