@@ -83,6 +83,13 @@ impl LeakyBucket {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_leaky_bucket_getters() {
+        let bucket = LeakyBucket::new(12_345, 678);
+        assert_eq!(bucket.rate_bytes_per_sec(), 12_345);
+        assert_eq!(bucket.burst_capacity(), 678.0);
+    }
+
     #[tokio::test]
     async fn test_leaky_bucket_burst_instantaneous() {
         let mut bucket = LeakyBucket::new(10_000, 1000); // 10 KB/s, 1000 B burst
@@ -94,6 +101,43 @@ mod tests {
         assert!(
             elapsed < Duration::from_millis(50),
             "Burst acquisition should be near instantaneous, took {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_leaky_bucket_partial_acquisition_tokens() {
+        let mut bucket = LeakyBucket::new(10_000, 1000);
+        // Initial capacity is 1000
+        bucket.acquire(400).await;
+        let remaining = bucket.available_tokens();
+        // Remaining should be approximately 600 (not 1000 / 400 = 2.5)
+        assert!(
+            (remaining - 600.0).abs() < 50.0,
+            "Expected ~600 tokens remaining after consuming 400, got {remaining}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_leaky_bucket_pacing_delay_with_partial_deficit() {
+        let mut bucket = LeakyBucket::new(10_000, 500); // 10 KB/s, 500 B burst
+
+        // Consume 300 bytes, leaving 200 bytes of tokens
+        bucket.acquire(300).await;
+
+        // Now acquire 500 bytes. With ~200 tokens available, deficit is ~300 bytes.
+        // At 10,000 B/s, deficit of 300 bytes takes 30ms.
+        // If deficit was computed as (cost + tokens) = 700 bytes, it would take 70ms!
+        let start = tokio::time::Instant::now();
+        bucket.acquire(500).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(25),
+            "Expected at least 25ms delay for 300 byte deficit, took {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(60),
+            "Deficit calculation overshoot: expected ~30ms, took {elapsed:?}"
         );
     }
 
@@ -127,6 +171,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_leaky_bucket_replenishment_uncapped() {
+        // High capacity so replenishment does not hit burst cap
+        let mut bucket = LeakyBucket::new(10_000, 5000);
+        bucket.acquire(5000).await; // exhaust burst
+
+        // Sleep 50ms: at 10,000 B/s, 0.05 * 10,000 = 500 tokens.
+        // If operator was '+' instead of '*', 0.05 + 10,000 = 10,000 tokens (capped at 5000).
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let tokens = bucket.available_tokens();
+        assert!(
+            tokens < 900.0,
+            "Tokens should replenish via elapsed * rate, not elapsed + rate. Got {tokens}"
+        );
+        assert!(
+            tokens >= 350.0,
+            "Tokens should have replenished to ~500. Got {tokens}"
+        );
+
+        // Now acquire 400 tokens without delay because ~500 tokens were replenished.
+        // If elapsed * rate was elapsed / rate (0.05 / 10,000 = 0 tokens), this would sleep for 40ms!
+        let acq_start = tokio::time::Instant::now();
+        bucket.acquire(400).await;
+        assert!(
+            acq_start.elapsed() < Duration::from_millis(25),
+            "Acquiring within replenished capacity should not sleep, took {:?}",
+            acq_start.elapsed()
+        );
+    }
+
+    #[tokio::test]
     async fn test_leaky_bucket_token_replenishment_cap() {
         let mut bucket = LeakyBucket::new(10_000, 500);
         bucket.acquire(500).await;
@@ -135,5 +209,29 @@ mod tests {
         let tokens = bucket.available_tokens();
         assert!(tokens <= 500.0);
         assert!(tokens >= 450.0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_leaky_bucket_exact_tokens_no_sleep_yield() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let yielded = Arc::new(AtomicBool::new(false));
+        let yielded_clone = yielded.clone();
+
+        tokio::spawn(async move {
+            yielded_clone.store(true, Ordering::SeqCst);
+        });
+
+        let mut bucket = LeakyBucket::new(10_000, 500);
+        // Acquire exactly 500 tokens (tokens == cost).
+        // If '<' is used, tokens < cost is false, so it does NOT await sleep(0),
+        // preventing a cooperative yield on the current thread.
+        bucket.acquire(500).await;
+
+        assert!(
+            !yielded.load(Ordering::SeqCst),
+            "Acquisition with exact capacity should not yield/sleep"
+        );
     }
 }
