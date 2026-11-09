@@ -155,3 +155,38 @@ Le système repose sur un modèle hybride sobre en bande passante :
 
 ### Statut d'évaluation
 > **Priorité haute / Stratégique** : Évolution majeure à forte valeur ajoutée pour les transmissions d'urgence et la communauté radioamateur.
+
+---
+
+## 9. Vérification formelle et garanties d'absence totale de panics (`no-panic` & `cargo-kani`)
+
+### Description et cas d'usage
+Dans un réseau tolérant aux délais (DTN) et particulièrement en contexte d'urgence ou d'infrastructure radio isolée, un crash de processus (`panic!`) sur un nœud intermédiaire ou une station autonome interrompt le stockage et le réacheminement de tous les paquets en transit. Au-delà des règles de linting statique (`clippy::unwrap_used` et `clippy::panic`), il s'agit d'intégrer des outils de garantie mathématique et de link-time vérifiant l'absence absolue de panics sur les chemins d'exécution critiques :
+
+1. **Option A : Attribut de link-time `#[no_panic]` (David Tolnay)** :
+   * Permet d'annoter les fonctions critiques de bas niveau (parsers de paquets, décodeurs réseau, fonctions cryptographiques).
+   * Fonctionnement : S'appuie sur les optimisations du compilateur LLVM en mode `--release` (dead code elimination). Si le compilateur ne parvient pas à prouver qu'un chemin de panique est inaccessible, l'édition de liens échoue immédiatement avec un symbole manquant (`__no_panic`).
+   * *Cibles idéales* : Parsing des segments LTP (`hardy-ltp`), décodeur CBOR SenML (`senml/parser.rs`), désérialisation des métadonnées de paniers CoAP/CBOR (`dtnbasket`).
+
+2. **Option B : Bounded Model Checking avec Kani (`cargo-kani`, AWS)** :
+   * Vérificateur formel bit-précis basé sur des solveurs SMT/SAT (CBMC).
+   * Fonctionnement : Explore symboliquement l'ensemble infini des combinaisons d'octets d'entrée sur un "harness" de test formel pour prouver mathématiquement :
+     * Zéro déréférencement hors bornes (`slice out-of-bounds` sur les indices de trames).
+     * Zéro débordement arithmétique (`integer overflow`).
+     * Zéro panique implicite (`Option::unwrap()` ou `Result::unwrap()`).
+   * *Cibles idéales* : Machine à états finis de réassemblage LTP (`SessionFsm`), calcul des claims de segments, moteur de vérification BPSec/BIB (`keystore.rs`).
+
+3. **Option C : Analyse statique de graphe d'appels (`cargo-call-stack` / Inspection de symboles)** :
+   * Avec `panic = "abort"` dans le profil de release, vérification que l'arbre d'appels des binaires compilés (`dtn-hdy-ham`, CLAs) ne référence pas les symboles de panique interne `core::panicking::panic` ou `rust_begin_unwind`.
+
+### Bénéfices attendus
+- **Résilience absolue sur liaisons radio bruitées** : Les trames corrompues ou fuzzées reçues par RF ne peuvent en aucun cas provoquer le crash du daemon.
+- **Zéro régression silencieuse** : Tout ajout de code potentiel provoquant un panic est détecté soit à la compilation (link-time), soit par les solveurs formels en CI.
+- **Zéro surcharge à l'exécution** : Contrairement aux défenses défensives dynamiques (catch_unwind), ces approches s'appuient sur l'élimination statique.
+
+### Défis techniques et inconvénients
+- **`#[no_panic]`** : Nécessite des builds optimisés (`--release`), car en mode debug sans optimisation LLVM, le compilateur ne simplifie pas les branches de vérification d'indices.
+- **Kani** : Les solveurs SMT requièrent des temps d'analyse plus longs en CI (plusieurs dizaines de secondes par harness) et imposent des bornes explicites (*unwind bounds*) sur les boucles dynamiques.
+
+### Statut d'évaluation
+> **Recommandé** : Intégration progressive en commençant par `#[no_panic]` sur les fonctions pures de parsing binaire de `hardy-ltp` et `senml`, puis écriture de harness Kani sur la FSM de session LTP.

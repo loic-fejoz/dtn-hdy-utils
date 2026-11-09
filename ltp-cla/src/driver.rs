@@ -382,8 +382,10 @@ impl Driver {
                             session.originator
                         } else if let Some(peer) = self.engine.peer_for_session(&session) {
                             peer
-                        } else if self.engine_to_addr.len() == 1 {
-                            *self.engine_to_addr.keys().next().unwrap()
+                        } else if let (1, Some(&only_peer)) =
+                            (self.engine_to_addr.len(), self.engine_to_addr.keys().next())
+                        {
+                            only_peer
                         } else {
                             warn!("received packet from unregistered UDP peer {peer_addr}");
                             EngineId(peer_addr.port() as u64)

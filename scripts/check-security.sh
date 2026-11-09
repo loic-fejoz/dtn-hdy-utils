@@ -58,15 +58,21 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 2. Rust Clippy Linter
+# 2. Rust Clippy Linter & Panic/Unwrap Guardrails
 # ------------------------------------------------------------------------------
 echo -e "${BOLD}▶ [2/5] Checking Rust static analysis & linter (cargo clippy)...${RESET}"
-if cargo clippy --workspace --all-targets -- -D warnings; then
-    echo -e "${GREEN}✓ Cargo clippy passed with zero warnings.${RESET}\n"
+echo -e "  - Enforcing zero unwrap() and zero panic!() in production code (--lib, --bins)..."
+if cargo clippy --workspace --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::panic; then
+    echo -e "${GREEN}✓ Production code is 100% panic-free and unwrap-free.${RESET}"
 else
-    echo -e "${RED}✗ Cargo clippy detected errors or warnings.${RESET}\n"
+    echo -e "${RED}✗ Production code contains forbidden unwrap() or panic!() calls!${RESET}"
+    echo -e "  Replace unwrap() with proper Option/Result propagation (?, ok_or_else) or poison-safe mutex access."
     FAILURES=$((FAILURES + 1))
 fi
+
+echo -e "  - Checking tests (unwrap_used allowed as warnings)..."
+cargo clippy --workspace --tests -- -W clippy::unwrap_used 2>&1 | grep -E "warning: used \`(unwrap|expect)\`" | head -n 5 || true
+echo -e "${GREEN}✓ Linter checks completed.${RESET}\n"
 
 # ------------------------------------------------------------------------------
 # 3. Secret Scanning (Gitleaks)

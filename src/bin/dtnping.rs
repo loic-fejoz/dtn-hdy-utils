@@ -134,7 +134,10 @@ struct PingApp {
 impl PingApp {
     fn print_path(&self, seq_no: u32) {
         let hops = {
-            let mut s = self.state.lock().unwrap();
+            let mut s = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             s.path_hops.remove(&seq_no).unwrap_or_default()
         };
 
@@ -258,7 +261,10 @@ impl BpaService for PingApp {
         };
 
         let sent_time = {
-            let mut s = self.state.lock().unwrap();
+            let mut s = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             s.sent_times.remove(&seq_no)
         };
 
@@ -275,7 +281,10 @@ impl BpaService for PingApp {
         let rtt = receive_time.duration_since(sent_time);
 
         {
-            let mut s = self.state.lock().unwrap();
+            let mut s = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             s.received += 1;
             s.replied.insert(seq_no);
             s.sum_rtt += rtt;
@@ -310,7 +319,10 @@ impl BpaService for PingApp {
         _timestamp: Option<time::OffsetDateTime>,
     ) {
         let (seq_no, elapsed) = {
-            let s = self.state.lock().unwrap();
+            let s = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let seq = s.bundle_id_to_seqno.get(bundle_id).cloned();
             if let Some(seq_no) = seq {
                 let elapsed = s.sent_times.get(&seq_no).map(|instant| instant.elapsed());
@@ -356,7 +368,10 @@ impl BpaService for PingApp {
 
             // Track path hops
             if from.to_string() != local_id {
-                let mut s = self.state.lock().unwrap();
+                let mut s = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 s.path_hops.entry(seq_no).or_default().push(PathHop {
                     node: from.clone(),
                     elapsed,
@@ -702,7 +717,7 @@ async fn main() -> anyhow::Result<()> {
                 let send_time = std::time::Instant::now();
                 match sink.send(&mut Bytes::from(binbundle)).await {
                     Ok(bundle_id) => {
-                        let mut s = state.lock().unwrap();
+                        let mut s = state.lock().unwrap_or_else(|p| p.into_inner());
                         s.sent += 1;
                         s.sent_times.insert(seq, send_time);
                         s.bundle_id_to_seqno.insert(bundle_id, seq);
@@ -730,7 +745,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Wait for remaining responses
     let all_replied = {
-        let s = state.lock().unwrap();
+        let s = state.lock().unwrap_or_else(|p| p.into_inner());
         s.received >= s.sent
     };
 
@@ -752,7 +767,7 @@ async fn main() -> anyhow::Result<()> {
             _ = async {
                 loop {
                     let done = {
-                        let s = state.lock().unwrap();
+                        let s = state.lock().unwrap_or_else(|p| p.into_inner());
                         s.received >= s.sent
                     };
                     if done {
@@ -766,7 +781,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Print summary statistics
     let (sent, received, min_rtt, max_rtt, sum_rtt, sum_rtt_squared_us) = {
-        let s = state.lock().unwrap();
+        let s = state.lock().unwrap_or_else(|p| p.into_inner());
         (
             s.sent,
             s.received,

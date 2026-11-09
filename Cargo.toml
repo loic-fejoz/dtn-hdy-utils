@@ -19,11 +19,17 @@ rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/loic-fejoz/dtn-hdy-utils"
 
+[workspace.lints.clippy]
+panic = "deny"
+
 [package]
 name = "dtn-hdy-utils"
 version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+
+[lints]
+workspace = true
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }

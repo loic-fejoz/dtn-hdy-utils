@@ -299,7 +299,7 @@ impl Default for Config {
         Self {
             callsign: None,
             transport: TransportMode::Udp {
-                bind_addr: "127.0.0.1:10042".parse().unwrap(),
+                bind_addr: std::net::SocketAddr::from(([127, 0, 0, 1], 10042)),
                 peer_addr: None,
             },
             hailing_encodings: default_hailing_encodings(),

@@ -587,7 +587,7 @@ impl Driver {
     ) {
         use tokio_serial::SerialPortBuilderExt;
 
-        let dummy_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let dummy_addr: SocketAddr = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
         let mut port_stream = match tokio_serial::new(&path, baud_rate).open_native_async() {
             Ok(s) => {
                 let _ = addr_tx.send(Ok(dummy_addr));

@@ -41,7 +41,7 @@ impl Sink for MockSink {
 pub async fn setup_udp_cla() -> (Arc<LtpCla>, SocketAddr) {
     let cfg = Config {
         transport: TransportMode::Udp {
-            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            bind_addr: std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
         },
         ..Default::default()
     };

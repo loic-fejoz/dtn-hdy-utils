@@ -492,7 +492,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let node_ids = node_ids.unwrap();
+    let node_ids = node_ids
+        .ok_or_else(|| anyhow::anyhow!("Registration timed out or returned no node IDs"))?;
 
     if args.verbose {
         eprintln!("Registered CLA with BPA node IDs: {:?}", node_ids);
@@ -595,7 +596,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let registered_eid = registered_eid.unwrap();
+    let registered_eid = registered_eid
+        .ok_or_else(|| anyhow::anyhow!("Registration timed out or failed to register endpoint"))?;
 
     eprintln!("Listening for BIBE bundles on: {}", registered_eid);
 

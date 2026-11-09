@@ -782,7 +782,10 @@ impl BasketService {
 
         let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
         {
-            let mut active = self.active_tasks.lock().unwrap();
+            let mut active = self
+                .active_tasks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             active.insert(request.req_id.clone(), cancel_tx);
         }
 
@@ -859,7 +862,10 @@ impl BasketService {
                 3 => {
                     let target_req_id = &item.uri;
                     let success = {
-                        let mut active = self.active_tasks.lock().unwrap();
+                        let mut active = self
+                            .active_tasks
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
                         if let Some(tx) = active.remove(target_req_id) {
                             let _ = tx.send(true);
                             true
@@ -917,7 +923,10 @@ impl BasketService {
         }
 
         {
-            let mut active = self.active_tasks.lock().unwrap();
+            let mut active = self
+                .active_tasks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             active.remove(&request.req_id);
         }
 

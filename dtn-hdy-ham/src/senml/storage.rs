@@ -141,10 +141,26 @@ impl SenmlStorage {
         }
     }
 
+    fn lock_conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn read_cache(&self) -> std::sync::RwLockReadGuard<'_, HashMap<String, i64>> {
+        self.cache.read().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn write_cache(&self) -> std::sync::RwLockWriteGuard<'_, HashMap<String, i64>> {
+        self.cache.write().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn read_config_path(&self) -> std::sync::RwLockReadGuard<'_, Option<PathBuf>> {
+        self.config_path.read().unwrap_or_else(|p| p.into_inner())
+    }
+
     /// Synchronizes initial configured dashboard metrics from YAML.
     pub fn sync_initial_config(&self, metrics: &[DashboardMetricConfig]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let mut cache = self.cache.write().unwrap();
+        let conn = self.lock_conn();
+        let mut cache = self.write_cache();
 
         for (idx, m) in metrics.iter().enumerate() {
             let order = (idx + 1) as i64;
@@ -179,7 +195,7 @@ impl SenmlStorage {
         }
 
         let now_ms = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_conn();
         let tx = conn.transaction()?;
 
         let mut points_to_broadcast = Vec::new();
@@ -187,7 +203,7 @@ impl SenmlStorage {
         for record in records {
             // 1. Resolve or insert metric_id via cache / dictionary
             let (metric_id, label, unit) = {
-                let cache = self.cache.read().unwrap();
+                let cache = self.read_cache();
                 if let Some(&id) = cache.get(&record.name) {
                     // Update unit if new unit provided and none stored
                     if let Some(ref u) = record.unit {
@@ -215,7 +231,7 @@ impl SenmlStorage {
                             params![record.name],
                             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                         )?;
-                    let mut cache_mut = self.cache.write().unwrap();
+                    let mut cache_mut = self.write_cache();
                     cache_mut.insert(record.name.clone(), id);
                     (id, custom_label, cur_unit)
                 }
@@ -261,7 +277,7 @@ impl SenmlStorage {
 
     /// Lists all known metrics in the dictionary.
     pub fn list_metrics(&self) -> Result<Vec<MetricEntry>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare(
             r#"
             SELECT id, name, unit, custom_label, display_order, is_visible
@@ -295,7 +311,7 @@ impl SenmlStorage {
         filter_ids: Option<&[String]>,
         dashboard_only: bool,
     ) -> Result<Vec<LatestMetricEntry>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let mut sql = String::from(
             r#"
             SELECT m.id, m.name, m.unit, m.custom_label, m.display_order, m.is_visible,
@@ -357,7 +373,7 @@ impl SenmlStorage {
         start_ms: i64,
         end_ms: i64,
     ) -> Result<Vec<HistoryPoint>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
 
         let metric_id: Option<i64> = if let Ok(num_id) = metric_name_or_id.parse::<i64>() {
             Some(num_id)
@@ -418,7 +434,7 @@ impl SenmlStorage {
 
     /// Adds a metric to the active dashboard.
     pub fn add_dashboard_card(&self, name: &str, label: Option<String>) -> Result<MetricEntry> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
 
         let max_order: i64 = conn
             .query_row(
@@ -470,7 +486,7 @@ impl SenmlStorage {
         label: Option<String>,
         order: Option<i64>,
     ) -> Result<MetricEntry> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
 
         if let Some(ref l) = label {
             conn.execute(
@@ -509,7 +525,7 @@ impl SenmlStorage {
 
     /// Removes a metric card from the dashboard (sets `is_visible = 0`).
     pub fn remove_dashboard_card(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         conn.execute(
             "UPDATE metric_dictionary SET is_visible = 0, display_order = NULL WHERE id = ?1",
             params![id],
@@ -521,7 +537,7 @@ impl SenmlStorage {
 
     /// Clears all cards from the dashboard (sets `is_visible = 0` on all).
     pub fn clear_dashboard(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         conn.execute(
             "UPDATE metric_dictionary SET is_visible = 0, display_order = NULL",
             [],
@@ -534,7 +550,7 @@ impl SenmlStorage {
     /// Persists visible dashboard cards back to YAML config file if configured.
     fn persist_to_yaml_if_needed(&self) -> Result<()> {
         let cfg_path = {
-            let p = self.config_path.read().unwrap();
+            let p = self.read_config_path();
             p.clone()
         };
 

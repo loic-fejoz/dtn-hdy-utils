@@ -221,11 +221,10 @@ async fn main() -> anyhow::Result<()> {
             if args.verbose {
                 println!("Result: success");
                 let now = time::OffsetDateTime::now_utc();
-                println!(
-                    "Time: {}",
-                    now.format(&time::format_description::well_known::Rfc3339)
-                        .unwrap()
-                );
+                let time_str = now
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_else(|_| "unknown".to_string());
+                println!("Time: {time_str}");
             }
 
             // Unregister to close cleanly
