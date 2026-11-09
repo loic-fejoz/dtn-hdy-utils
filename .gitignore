@@ -4,3 +4,7 @@
 agy-landrun.sh
 __pycache__/
 *.pyc
+
+mutants.out/
+mutants.out*/
+.mutants/

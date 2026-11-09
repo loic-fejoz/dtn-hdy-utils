@@ -49,7 +49,7 @@ run_check() {
 # ------------------------------------------------------------------------------
 # 1. Rust Code Formatting
 # ------------------------------------------------------------------------------
-echo -e "${BOLD}▶ [1/5] Checking Rust code formatting (cargo fmt)...${RESET}"
+echo -e "${BOLD}▶ [1/6] Checking Rust code formatting (cargo fmt)...${RESET}"
 if cargo fmt --check; then
     echo -e "${GREEN}✓ Rust code formatting is compliant.${RESET}\n"
 else
@@ -60,7 +60,7 @@ fi
 # ------------------------------------------------------------------------------
 # 2. Rust Clippy Linter & Panic/Unwrap Guardrails
 # ------------------------------------------------------------------------------
-echo -e "${BOLD}▶ [2/5] Checking Rust static analysis & linter (cargo clippy)...${RESET}"
+echo -e "${BOLD}▶ [2/6] Checking Rust static analysis & linter (cargo clippy)...${RESET}"
 echo -e "  - Enforcing zero unwrap() and zero panic!() in production code (--lib, --bins)..."
 if cargo clippy --workspace --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::panic; then
     echo -e "${GREEN}✓ Production code is 100% panic-free and unwrap-free.${RESET}"
@@ -77,7 +77,7 @@ echo -e "${GREEN}✓ Linter checks completed.${RESET}\n"
 # ------------------------------------------------------------------------------
 # 3. Secret Scanning (Gitleaks)
 # ------------------------------------------------------------------------------
-echo -e "${BOLD}▶ [3/5] Checking for hardcoded secrets (gitleaks)...${RESET}"
+echo -e "${BOLD}▶ [3/6] Checking for hardcoded secrets (gitleaks)...${RESET}"
 GITLEAKS_BIN="$(command -v gitleaks || true)"
 if [ -z "$GITLEAKS_BIN" ] && [ -x "$HOME/.cargo/bin/gitleaks" ]; then
     GITLEAKS_BIN="$HOME/.cargo/bin/gitleaks"
@@ -114,7 +114,7 @@ fi
 # ------------------------------------------------------------------------------
 # 4. Dependency Vulnerability Audit (Cargo Audit)
 # ------------------------------------------------------------------------------
-echo -e "${BOLD}▶ [4/5] Checking Rust dependencies for vulnerabilities (cargo audit)...${RESET}"
+echo -e "${BOLD}▶ [4/6] Checking Rust dependencies for vulnerabilities (cargo audit)...${RESET}"
 CARGO_AUDIT_BIN="$(command -v cargo-audit || true)"
 if [ -z "$CARGO_AUDIT_BIN" ] && [ -x "$HOME/.cargo/bin/cargo-audit" ]; then
     CARGO_AUDIT_BIN="$HOME/.cargo/bin/cargo-audit"
@@ -139,9 +139,36 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 5. Web Frontend Dependency Audit (pnpm / npm audit)
+# 5. Dependency Supply Chain & License Compliance (Cargo Deny)
 # ------------------------------------------------------------------------------
-echo -e "${BOLD}▶ [5/5] Checking Web frontend dependencies for vulnerabilities...${RESET}"
+echo -e "${BOLD}▶ [5/6] Checking Rust dependency supply chain & licenses (cargo deny)...${RESET}"
+CARGO_DENY_BIN="$(command -v cargo-deny || true)"
+if [ -z "$CARGO_DENY_BIN" ] && [ -x "$HOME/.cargo/bin/cargo-deny" ]; then
+    CARGO_DENY_BIN="$HOME/.cargo/bin/cargo-deny"
+fi
+
+if [ -n "$CARGO_DENY_BIN" ] || cargo deny --version >/dev/null 2>&1; then
+    if ${CARGO_DENY_BIN:-cargo-deny} check; then
+        echo -e "${GREEN}✓ Cargo deny passed (licenses, bans, sources and advisories compliant).${RESET}\n"
+    else
+        echo -e "${RED}✗ Cargo deny detected non-compliant licenses, bans, or advisories!${RESET}\n"
+        FAILURES=$((FAILURES + 1))
+    fi
+else
+    echo -e "${YELLOW}⚠ cargo-deny not found.${RESET}"
+    echo -e "  To install: curl -sSfL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz | tar -xz -C ~/.cargo/bin --strip-components=1 cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny"
+    if [ "$STRICT_MODE" = true ]; then
+        echo -e "${RED}✗ Strict mode enabled: missing cargo-deny is a failure.${RESET}\n"
+        FAILURES=$((FAILURES + 1))
+    else
+        echo -e "${YELLOW}  Skipping cargo deny (non-strict mode).${RESET}\n"
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# 6. Web Frontend Dependency Audit (pnpm / npm audit)
+# ------------------------------------------------------------------------------
+echo -e "${BOLD}▶ [6/6] Checking Web frontend dependencies for vulnerabilities...${RESET}"
 if [ -d "dtn-hdy-ham/web" ]; then
     # Protect against restricted runtime / sandbox permissions on XDG directories
     if ! (mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/.test-$$" 2>/dev/null && rmdir "${XDG_DATA_HOME:-$HOME/.local/share}/.test-$$" 2>/dev/null); then
