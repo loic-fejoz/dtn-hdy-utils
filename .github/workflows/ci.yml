@@ -182,5 +182,53 @@ jobs:
         run: cargo fuzz run parse_frame -- -max_total_time=15
         working-directory: dtn-hdy-utils/hqfbp-cla
 
+  code-coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout dtn-hdy-utils
+        uses: actions/checkout@v7
+        with:
+          path: dtn-hdy-utils
+
+      - name: Checkout hardy dependency
+        uses: actions/checkout@v7
+        with:
+          repository: ricktaylor/hardy
+          path: hardy
+          ref: '260fe751a0d8058d3a438d3b588bc05502bd1727'
+
+      - name: Checkout hqfbp-rs dependency
+        uses: actions/checkout@v7
+        with:
+          repository: loic-fejoz/hqfbp-rs
+          path: hqfbp-rs
+          ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
+
+      - name: Install Protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Measure Code Coverage
+        run: ./scripts/check-coverage.sh --lcov --output-path lcov.info
+        working-directory: dtn-hdy-utils
+
+      - name: Upload LCOV Coverage Report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: code-coverage-report
+          path: dtn-hdy-utils/lcov.info
+          if-no-files-found: ignore
+
+
 
 

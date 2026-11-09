@@ -23,10 +23,21 @@ This document provides a guide on how to write, mock, and run tests for the `dtn
 - For `dtntrigger`, verify temporary file generation and execution of external commands.
 - For `dtnfiles`, verify auto file extension detection logic via unit tests in `src/bin/dtnfiles.rs`.
 
+## Code Coverage
+To assess test coverage across all crates and components:
+- Run `./scripts/check-coverage.sh` for a full terminal report.
+- Run `./scripts/check-coverage.sh --summary-only` for an aggregated summary.
+- Run `./scripts/check-coverage.sh --html` to generate an interactive HTML report in `target/llvm-cov/html/index.html`.
+- Run `./scripts/check-coverage.sh --lcov` to export an LCOV tracefile (`lcov.info`) for CI pipelines.
+Coverage uses LLVM source-based instrumentation (`cargo-llvm-cov`), excluding fuzzing targets.
+
 ## Running Tests
 Always run the validation suite before delivering modifications:
 - Run `cargo test` to execute all defined test cases.
 - Run `cargo clippy && cargo fmt --check` to ensure the codebase remains clean and warning-free.
+- Run `./scripts/check-security.sh --strict` to verify security guardrails, dependencies, and license compliance.
+- Run `./scripts/check-coverage.sh --summary-only` to monitor test coverage regressions.
 - Ensure the `hardy` checkout `ref` in `.github/workflows/ci.yml` is updated whenever `hardy` dependencies, trait signatures, or patches evolve.
+
 
 

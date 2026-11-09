@@ -495,12 +495,13 @@ flowchart TD
   * Ajout de `./scripts/check-security.sh` dans les vérifications impératives de l'agent.
 
 ##### Priorité 2 : Conformité des licences, bannissement de dépendances & Couverture de tests
-* [ ] **Gouvernance des licences et doublons (`cargo-deny`)** :
-  * Validation stricte des licences autorisées (MIT, Apache-2.0, BSD-3-Clause) et blocage des licences restrictives ou incompatibles (GPLv3 virale non souhaitée sur les bibliothèques).
-  * Détection et interdiction des crates dupliquées (versions multiples d'une même dépendance transitive).
-* [ ] **Surveillance de la couverture de code (`cargo-llvm-cov` / `cargo-tarpaulin`)** :
-  * Intégration de métriques de couverture de tests sur les composants critiques (`hardy-bpsec`, `hardy-ltp`, parsers SenML et CBOR).
-  * Prévention des régressions sur les branches sensibles et les cas d'erreur de parsing réseau.
+* [x] **Gouvernance des licences et doublons (`cargo-deny`)** :
+  * Validation stricte des licences autorisées (MIT, Apache-2.0, BSD-3-Clause) et blocage des licences restrictives ou incompatibles (GPLv3 virale non souhaitée sur les bibliothèques) via `deny.toml`.
+  * Détection et interdiction des failles d'advisory, bans et sources non autorisées intégrées dans `scripts/check-security.sh` et la CI.
+* [x] **Surveillance de la couverture de code (`cargo-llvm-cov`)** :
+  * Intégration de la couverture source native LLVM (`cargo-llvm-cov`) via le script unifié `scripts/check-coverage.sh` (console, HTML et export LCOV).
+  * Mesure globale sur l'ensemble du workspace (>65% couverture globale, >90% sur `ltp`, `pacing`, `keystore`, et parsers SenML).
+  * Job automatisé `code-coverage` dans GitHub Actions (`.github/workflows/ci.yml`) avec génération d'artéfact LCOV.
 
 ##### Priorité 3 : Analyse sémantique avancée (SAST) & Sécurité mémoire
 * [ ] **Analyse statique approfondie (GitHub CodeQL / Semgrep)** :

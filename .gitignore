@@ -8,3 +8,8 @@ __pycache__/
 mutants.out/
 mutants.out*/
 .mutants/
+
+# Coverage artifacts
+lcov.info
+coverage.json
+

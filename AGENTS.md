@@ -12,6 +12,7 @@ Always run verification tests and check formatting before final delivery:
 - **Lint**: `cargo clippy && cargo fmt`
 - **Panic & Unwrap Guardrails**: Production code (`--lib`, `--bins`) MUST be 100% `unwrap`-free and `panic!`-free. Use `?`, `.ok_or_else()`, or poison-safe mutex access.
 - **Security & Quality**: `./scripts/check-security.sh` (or `./scripts/check-security.sh --strict`)
+- **Code Coverage**: `./scripts/check-coverage.sh` (or `./scripts/check-coverage.sh --html` / `--summary-only`)
 - **CI Sync**: Whenever updating `hardy` dependencies or signatures, update the `hardy` checkout `ref` in `.github/workflows/ci.yml`.
 
 ## Directory Map
