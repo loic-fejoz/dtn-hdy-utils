@@ -1,0 +1,96 @@
+# ==============================================================================
+# dtn-hdy-ham: Hamradio DTN BPv7 Bundle Processing Node Configuration
+# ==============================================================================
+# Format: YAML (TOML is also supported transparently by dtn-hdy-ham)
+#
+# Quick start:
+#   1. Copy this file to config.yaml
+#   2. Edit your callsign / node-id below
+#   3. Run: dtn-hdy-ham -c config.yaml
+# ==============================================================================
+
+# Node Identification
+# --------------------
+# Administrative callsign (optional shorthand)
+callsign: "N0CALL"
+
+# Primary Administrative Node EID (RFC 9171)
+# Typically dtn://<callsign>.ampr.org/ or ipn:<node_number>.0
+node-id: "dtn://n0call.ampr.org/"
+
+# Additional admin EID endpoints this node accepts bundles for
+admin-endpoints: []
+
+# Persistent Storage
+# ------------------
+storage:
+  # Directory where SQLite database and file bundle payloads are kept
+  data-dir: "~/.local/share/dtn-hdy-ham"
+  # Set to true for ephemeral, non-persistent in-memory operation
+  in-memory: false
+
+# Application Services & Storage Quota
+# ------------------------------------
+application:
+  quota:
+    # Maximum disk storage dedicated to application data (payloads + database).
+    # When this quota is reached, a 4-tier LRU cascade safely reclaims space:
+    # (Expired Chats -> Expired Files -> Active Chats -> Active Files).
+    # Sticky messages and files are strictly protected and never deleted.
+    # Supported formats: "300MB", "300MiB", "1GB", etc. (Default: 300MB)
+    max-storage: "300MB"
+
+# Local gRPC Interface (for CLI utilities: dtnsend, dtnprint, dtntrigger, dtnfiles)
+# ---------------------------------------------------------------------------------
+grpc:
+  enabled: true
+  address: "[::]:50051"
+
+# Web Dashboard & REST API
+# -------------------------
+web:
+  # Listening socket for browser access (Interactive Chat, Files, Diagnostics)
+  address: "127.0.0.1:8080"
+  # Directory containing precompiled web assets (embedded by default in releases)
+  # static-dir: "web/dist"
+
+# Convergence Layer Adapters (CLAs)
+# ---------------------------------
+clas:
+  - name: "tcpcl-hamnet"
+    type: "tcpclv4"
+    address: "[::]:4556"
+    # Plaintext mode (RFC 9174 without TLS) compliant with amateur radio rules
+    require-tls: false
+    peers: []
+
+  # Example: AX.25 KISS TNC via Direwolf soundmodem TCP port
+  # - name: "kiss-vhf"
+  #   type: "hqfbp"
+  #   callsign: "N0CALL-1"
+  #   transport:
+  #     type: "tcp"
+  #     address: "127.0.0.1:8001"
+  #     port: 0
+
+  # Example: LTP (Licklider Transmission Protocol RFC 5326) over UDP
+  # - name: "ltp-udp"
+  #   type: "ltp"
+  #   engine-id: 1001
+  #   transport:
+  #     type: "udp"
+  #     bind-addr: "0.0.0.0:1113"
+
+# Static Routing Rules
+# --------------------
+# Route outgoing bundles matching pattern through the designated CLA
+routes:
+  - pattern: "dtn://*/*"
+    cla: "tcpcl-hamnet"
+
+# RFC 9171 Ingress Validation Policy
+# ----------------------------------
+rfc9171-validity:
+  # Set false for maximum interoperability with dtn-android-messenger and dtn7-rs
+  primary-block-integrity: false
+  bundle-age-required: false

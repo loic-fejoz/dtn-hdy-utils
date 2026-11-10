@@ -224,6 +224,7 @@ jobs:
           
           cp -r dtn-hdy-utils/dtn-hdy-ham/web/dist/* "${HAM_ROOT}/web/dist/"
           cp "dtn-hdy-utils/dtn-hdy-ham/config.example.toml" "${HAM_ROOT}/"
+          cp "dtn-hdy-utils/dtn-hdy-ham/config.example.yaml" "${HAM_ROOT}/"
           cp "dtn-hdy-utils/dtn-hdy-ham/QUICKSTART.md" "${HAM_ROOT}/"
           if [[ "${PLATFORM}" == linux* ]]; then
             cp "dtn-hdy-utils/dtn-hdy-ham/dtn-hdy-ham.service" "${HAM_ROOT}/"

@@ -373,10 +373,26 @@ pub struct DashboardMetricConfig {
 }
 
 impl HamConfig {
+    /// Checks whether a configuration file is empty (0 bytes or only comments/whitespace).
+    pub fn is_empty_file(path: &Path) -> bool {
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if metadata.len() == 0 {
+                return true;
+            }
+            if let Ok(content) = std::fs::read_to_string(path) {
+                return content.lines().all(|line| {
+                    let trimmed = line.trim();
+                    trimmed.is_empty() || trimmed.starts_with('#')
+                });
+            }
+        }
+        false
+    }
+
     /// Checks if a configuration file exists at explicit path or in standard locations.
     pub fn find_config(path: Option<&Path>) -> Option<PathBuf> {
         if let Some(p) = path {
-            if p.exists() {
+            if p.exists() && !Self::is_empty_file(p) {
                 Some(p.to_path_buf())
             } else {
                 None
@@ -398,6 +414,9 @@ impl HamConfig {
         };
 
         if let Some(config_file) = candidate_path {
+            if Self::is_empty_file(&config_file) {
+                anyhow::bail!("Configuration file is empty: {}", config_file.display());
+            }
             tracing::info!("Loading configuration from {}", config_file.display());
             let s = config::Config::builder()
                 .add_source(config::File::from(config_file.clone()))
@@ -442,10 +461,10 @@ impl HamConfig {
     }
 
     fn find_default_config() -> Option<PathBuf> {
-        let local_names = ["dtn-hdy-ham.yaml", "dtn-hdy-ham.toml", "config.yaml"];
+        let local_names = ["dtn-hdy-ham.toml", "dtn-hdy-ham.yaml", "config.yaml"];
         for name in local_names {
             let p = PathBuf::from(name);
-            if p.exists() {
+            if p.exists() && !Self::is_empty_file(&p) {
                 return Some(p);
             }
         }
@@ -455,13 +474,13 @@ impl HamConfig {
                 .config_dir()
                 .join("dtn-hdy-ham")
                 .join("config.yaml");
-            if user_conf.exists() {
+            if user_conf.exists() && !Self::is_empty_file(&user_conf) {
                 return Some(user_conf);
             }
         }
 
         let sys_conf = PathBuf::from("/etc/dtn-hdy-ham/config.yaml");
-        if sys_conf.exists() {
+        if sys_conf.exists() && !Self::is_empty_file(&sys_conf) {
             return Some(sys_conf);
         }
 

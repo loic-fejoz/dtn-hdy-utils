@@ -397,3 +397,120 @@ routes:
     server.bpa().start(false).await;
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn test_stata_manual_toml_and_yaml_parity() {
+    let yaml_path = std::path::Path::new("../examples/stata-manual.yaml");
+    let toml_path = std::path::Path::new("../examples/stata-manual.toml");
+
+    let yaml_config = HamConfig::load(Some(yaml_path)).expect("valid YAML config");
+    let toml_config = HamConfig::load(Some(toml_path)).expect("valid TOML config");
+
+    assert_eq!(yaml_config.callsign, toml_config.callsign);
+    assert_eq!(yaml_config.node_id, toml_config.node_id);
+    assert_eq!(yaml_config.storage.in_memory, toml_config.storage.in_memory);
+    assert_eq!(yaml_config.storage.data_dir, toml_config.storage.data_dir);
+    assert_eq!(yaml_config.grpc.enabled, toml_config.grpc.enabled);
+    assert_eq!(yaml_config.grpc.address, toml_config.grpc.address);
+    assert_eq!(
+        yaml_config.web.as_ref().map(|w| w.address),
+        toml_config.web.as_ref().map(|w| w.address)
+    );
+    assert_eq!(
+        yaml_config
+            .rfc9171_validity
+            .as_ref()
+            .and_then(|r| r.primary_block_integrity),
+        toml_config
+            .rfc9171_validity
+            .as_ref()
+            .and_then(|r| r.primary_block_integrity)
+    );
+    assert_eq!(
+        yaml_config
+            .rfc9171_validity
+            .as_ref()
+            .and_then(|r| r.bundle_age_required),
+        toml_config
+            .rfc9171_validity
+            .as_ref()
+            .and_then(|r| r.bundle_age_required)
+    );
+    assert_eq!(yaml_config.clas.len(), toml_config.clas.len());
+    assert_eq!(yaml_config.clas[0].name, toml_config.clas[0].name);
+    assert_eq!(yaml_config.routes.len(), toml_config.routes.len());
+    assert_eq!(yaml_config.routes[0].pattern, toml_config.routes[0].pattern);
+    assert_eq!(yaml_config.routes[1].pattern, toml_config.routes[1].pattern);
+}
+
+#[tokio::test]
+async fn test_config_example_parity() {
+    let toml_path = std::path::Path::new("config.example.toml");
+    let yaml_path = std::path::Path::new("config.example.yaml");
+
+    let toml_cfg = HamConfig::load(Some(toml_path)).expect("config.example.toml must be valid");
+    let yaml_cfg = HamConfig::load(Some(yaml_path)).expect("config.example.yaml must be valid");
+
+    assert_eq!(toml_cfg.callsign, yaml_cfg.callsign);
+    assert_eq!(toml_cfg.node_id, yaml_cfg.node_id);
+    assert_eq!(toml_cfg.storage.data_dir, yaml_cfg.storage.data_dir);
+    assert_eq!(toml_cfg.storage.in_memory, yaml_cfg.storage.in_memory);
+    assert_eq!(
+        toml_cfg.application.quota.max_storage,
+        yaml_cfg.application.quota.max_storage
+    );
+    assert_eq!(toml_cfg.grpc.enabled, yaml_cfg.grpc.enabled);
+    assert_eq!(toml_cfg.grpc.address, yaml_cfg.grpc.address);
+    assert_eq!(
+        toml_cfg.web.as_ref().map(|w| w.address),
+        yaml_cfg.web.as_ref().map(|w| w.address)
+    );
+    assert_eq!(toml_cfg.clas.len(), yaml_cfg.clas.len());
+    assert_eq!(toml_cfg.clas[0].name, yaml_cfg.clas[0].name);
+    assert_eq!(toml_cfg.routes.len(), yaml_cfg.routes.len());
+    assert_eq!(toml_cfg.routes[0].pattern, yaml_cfg.routes[0].pattern);
+}
+
+#[tokio::test]
+async fn test_empty_config_file_behavior() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // 1. 0-byte YAML file
+    let empty_yaml = dir.path().join("empty.yaml");
+    std::fs::write(&empty_yaml, "").unwrap();
+
+    assert!(HamConfig::is_empty_file(&empty_yaml));
+    assert_eq!(HamConfig::find_config(Some(&empty_yaml)), None);
+    let err_yaml = HamConfig::load(Some(&empty_yaml)).unwrap_err();
+    assert!(err_yaml.to_string().contains("is empty"));
+
+    // 2. Comments/whitespace-only TOML file
+    let empty_toml = dir.path().join("empty.toml");
+    std::fs::write(
+        &empty_toml,
+        "# Initial empty config\n   \n# More comments\n",
+    )
+    .unwrap();
+
+    assert!(HamConfig::is_empty_file(&empty_toml));
+    assert_eq!(HamConfig::find_config(Some(&empty_toml)), None);
+    let err_toml = HamConfig::load(Some(&empty_toml)).unwrap_err();
+    assert!(err_toml.to_string().contains("is empty"));
+
+    // 3. Wizard started with empty.toml as suggested save path saves valid TOML and reloads cleanly
+    let input = b"F4XYZ\n\n\n\n\n";
+    let mut reader = &input[..];
+    let mut output = Vec::new();
+
+    let cfg = dtn_hdy_ham::run_wizard(&mut reader, &mut output, Some(empty_toml.clone())).unwrap();
+    assert_eq!(cfg.callsign, Some("F4XYZ".to_string()));
+    assert!(!HamConfig::is_empty_file(&empty_toml));
+    assert_eq!(
+        HamConfig::find_config(Some(&empty_toml)),
+        Some(empty_toml.clone())
+    );
+
+    let reloaded = HamConfig::load(Some(&empty_toml)).expect("should load valid TOML");
+    assert_eq!(reloaded.callsign, Some("F4XYZ".to_string()));
+    assert_eq!(reloaded.node_id, "dtn://f4xyz/");
+}

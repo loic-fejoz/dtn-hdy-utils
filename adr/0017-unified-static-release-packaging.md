@@ -25,7 +25,8 @@ We establish a unified, automated multi-platform static packaging and release pi
      - `dtnfiles`
      - `dtntrigger`
    - Onboarding assets included:
-     - `config.example.toml`: Documented reference configuration file.
+     - `config.example.toml`: Documented reference configuration file (TOML format).
+     - `config.example.yaml`: Documented reference configuration file (YAML format).
      - `QUICKSTART.md`: Step-by-step first-launch guide (daemon, Web UI, CLI tests).
      - `dtn-hdy-ham.service`: Systemd service unit template for Linux daemons.
      - `README.md` and `LICENSE`.
@@ -47,6 +48,7 @@ Every archive extracts into a self-contained root directory to avoid polluting t
 │   └── <binary2>...
 ├── QUICKSTART.md (for ham)
 ├── config.example.toml (for ham)
+├── config.example.yaml (for ham)
 ├── dtn-hdy-ham.service (for ham)
 ├── examples/ (for utils)
 ├── README.md
