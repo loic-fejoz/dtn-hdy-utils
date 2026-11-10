@@ -57,7 +57,10 @@ pub enum CancelReason {
 
 impl CancelReason {
     /// Decodes a wire reason code; returns `None` for reserved codes (`0x06`–`0xFF`).
-    #[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+    #[cfg_attr(
+        all(not(debug_assertions), not(target_env = "msvc")),
+        no_panic::no_panic
+    )]
     #[must_use]
     pub fn from_code(code: u8) -> Option<Self> {
         match code {
@@ -72,7 +75,10 @@ impl CancelReason {
     }
 
     /// Returns the wire byte representation of this reason code.
-    #[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+    #[cfg_attr(
+        all(not(debug_assertions), not(target_env = "msvc")),
+        no_panic::no_panic
+    )]
     #[must_use]
     pub fn code(self) -> u8 {
         self as u8

@@ -25,7 +25,10 @@ pub fn cla_address_to_callsign(cla_addr: &ClaAddress) -> Option<String> {
 }
 
 /// Checks whether raw callsign bytes represent a broadcast destination (`"CQ"`, `""`), with link-time no-panic guarantee.
-#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+#[cfg_attr(
+    all(not(debug_assertions), not(target_env = "msvc")),
+    no_panic::no_panic
+)]
 #[must_use]
 pub fn is_broadcast_callsign_bytes(mut callsign: &[u8]) -> bool {
     while let [first, rest @ ..] = callsign {

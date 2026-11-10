@@ -65,7 +65,10 @@ pub enum Command {
 
 impl Command {
     /// Decodes a command byte into a [`Command`] variant with no-panic guarantee.
-    #[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+    #[cfg_attr(
+        all(not(debug_assertions), not(target_env = "msvc")),
+        no_panic::no_panic
+    )]
     #[must_use]
     pub fn from_u8(code: u8) -> Self {
         match code & 0x0F {
@@ -82,7 +85,10 @@ impl Command {
     }
 
     /// Converts a [`Command`] variant into its wire command byte with no-panic guarantee.
-    #[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+    #[cfg_attr(
+        all(not(debug_assertions), not(target_env = "msvc")),
+        no_panic::no_panic
+    )]
     #[must_use]
     pub fn to_u8(self) -> u8 {
         match self {
@@ -171,7 +177,10 @@ pub fn escape(input: &[u8], out: &mut Vec<u8>) {
 ///
 /// Returns [`Error::InvalidEscape`] if `FESC` is followed by an invalid byte.
 /// Returns [`Error::TruncatedEscape`] if `FESC` is the last byte in the slice.
-#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+#[cfg_attr(
+    all(not(debug_assertions), not(target_env = "msvc")),
+    no_panic::no_panic
+)]
 pub fn unescape_in_place(buf: &mut [u8]) -> Result<usize> {
     let mut read_idx = 0;
     let mut write_idx = 0;

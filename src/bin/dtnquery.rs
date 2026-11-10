@@ -462,7 +462,7 @@ storage:
                 assert_eq!(db_dir, std::path::PathBuf::from("/tmp/my-db-dir"));
                 assert_eq!(db_name, "test.db");
             }
-            _ => assert!(false, "Expected Sqlite metadata config"),
+            _ => panic!("Expected Sqlite metadata config"),
         }
     }
 
@@ -479,7 +479,7 @@ storage:
             MetadataConfig::Postgres { database_url } => {
                 assert_eq!(database_url, "postgres://localhost/db");
             }
-            _ => assert!(false, "Expected Postgres metadata config"),
+            _ => panic!("Expected Postgres metadata config"),
         }
     }
 
