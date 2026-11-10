@@ -190,3 +190,43 @@ Dans un réseau tolérant aux délais (DTN) et particulièrement en contexte d'u
 
 ### Statut d'évaluation
 > **Recommandé** : Intégration progressive en commençant par `#[no_panic]` sur les fonctions pures de parsing binaire de `hardy-ltp` et `senml`, puis écriture de harness Kani sur la FSM de session LTP.
+
+---
+
+## 10. Surcharge de configuration par variables d'environnement (`DTN_HDY_HAM__*`)
+
+### Description et cas d'usage
+Conformément aux directives d'architecture de Hardy (`hardy/docs/design.md` §7), permettre la surcharge dynamique de toute clé de configuration par des variables d'environnement préfixées par `DTN_HDY_HAM__` avec séparateur double tiret bas `__` pour la hiérarchie imbriquée (ex: `DTN_HDY_HAM__CALLSIGN=F4XYZ`, `DTN_HDY_HAM__STORAGE__IN_MEMORY=true`, `DTN_HDY_HAM__WEB__ADDRESS="0.0.0.0:8088"`).
+
+### Bénéfices attendus
+- **Déploiements conteneurisés simplifiés (Docker, Podman, Kubernetes)** : Permet de configurer une station DTN radioamateur complète via un fichier `docker-compose.yml` ou des variables d'environnement système sans injecter ni monter de volume de fichier de configuration.
+- **Intégration systemd** : Possibilité d'utiliser `EnvironmentFile=/etc/default/dtn-hdy-ham` dans l'unité systemd pour les déploiements d'infrastructure.
+- **Homogénéité avec l'écosystème Hardy** : Aligne `dtn-hdy-ham` avec le comportement standard des binaires `hardy-bpa-server` et `hardy-tcpclv4-server`.
+
+### Défis techniques et inconvénients
+- Nécessite d'ajouter la source `config::Environment::with_prefix("DTN_HDY_HAM").separator("__")` dans le constructeur de configuration de `HamConfig::load`.
+- Veiller à préserver la priorité : valeurs par défaut < fichier de configuration < variables d'environnement < arguments de ligne de commande (CLI).
+
+### Statut d'évaluation
+> **Priorité haute / Facile** : Très faible coût de mise en œuvre dans `HamConfig::load`, gain opérationnel immédiat pour les conteneurs et déploiements automatisés.
+
+---
+
+## 11. Intégration du CLA basé sur fichiers (`hardy-file-cla` / Sneakernet)
+
+### Description et cas d'usage
+Intégrer le crate officiel `hardy-file-cla` de Hardy au sein de `dtn-hdy-ham` afin de permettre l'échange et le relayage de bundles BPv7 à travers des répertoires du système de fichiers (dossiers entrants `inbox` et sortants `outbox`), idéaux pour le transport physique ("Sneakernet") sur clés USB, cartes SD ou dossiers partagés synchronisés (Syncthing, Nextcloud, rsync).
+
+### Bénéfices attendus
+- **Résilience absolue en blackout total** : Même sans aucune liaison radio HF/VHF disponible ni connectivité IP, deux stations peuvent échanger des messages, fichiers de secours et télémétrie par simple transfert physique d'une clé USB.
+- **Passerelle hybride Air-Gap** : Permet à une station isolée non connectée à Internet de transférer des bundles vers une passerelle via un média amovible.
+- **Standardisation** : Réutilise directement le composant officiel `hardy-file-cla` maintenu dans l'arborescence Hardy.
+
+### Défis techniques et inconvénients
+- Surveillance de répertoire (polling vs notifications inotify/kqueue).
+- Gestion des permissions de fichiers sur médias amovibles (systèmes de fichiers FAT32/exFAT sans permissions POSIX).
+- Prise en compte dans l'IHM web (affichage de l'état du CLA fichier et du nombre de paquets déposés/lus).
+
+### Statut d'évaluation
+> **Recommandé** : Forte pertinence pour les exercices de Sécurité Civile et réseaux d'urgence en zone sinistrée.
+

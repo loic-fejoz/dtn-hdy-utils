@@ -521,6 +521,29 @@ flowchart TD
 
 ---
 
+### Phase 10: Contact Scheduling & Topology Management — Planification Cron vs `hardy-tvr` (Time-Variant Routing)
+> **Goal**: Clarifier, faire évoluer et unifier la planification temporelle des contacts pour les liaisons radioamateurs intermittentes, en articulant le coordinateur cron existant avec l'architecture Time-Variant Routing (`hardy-tvr`).
+
+#### Contexte & Analyse comparative :
+* **Approche actuelle (`dtn-hdy-ham` Coordinator)** :
+  * Planification périodique basée sur la syntaxe cron (ex: `schedule.cron: "*/43 * * * *"` avec `duration: "300s"`).
+  * Optimisée pour les cycles d'écoute et de veille radioamateurs terrestres (réveil HF/VHF régulier, économie d'énergie sur batteries solaires de relais).
+  * Déclenche l'ouverture et la fermeture des sessions CLA de façon déterministe au niveau local.
+* **Approche Hardy Upstream (`hardy-tvr`)** :
+  * Implémentation du standard TVR (Time-Variant Routing) adossée à un graphe spatio-temporel de contacts planifiés (Contact Plans).
+  * Idéale pour les fenêtres orbitales (satellites LEO, CubeSats, passages de stations spatiales) avec débuts/fins d'opportunités absolus et variations de bande passante/délai.
+
+#### Livrables & Évolutions envisagées :
+1. **Pérennisation et enrichissement du planificateur Cron** :
+   * [x] Support des plannings de contact récurrents sur les CLA TCPCLv4 et Mercury (`coordinator/mod.rs`).
+   * [ ] Visualisation temporelle des prochaines fenêtres de contact dans l'IHM Web (sous-onglet Station > Radio).
+   * [ ] Déclenchement manuel "Force Contact Now" depuis l'interface d'administration.
+2. **Passerelle et interopérabilité avec `hardy-tvr`** :
+   * Évaluer l'importation de plans de contact TVR standards (format JSON/tableaux d'opportunités) pour les passerelles sol/satellite amateur (passages de satellites radioamateurs OSCAR / AMSAT).
+   * Permettre à `dtn-hdy-ham` d'agir comme agent de contact hybride : exécution des règles cycliques (cron) en local, avec possibilité d'ingérer un contact plan satellite issu de `hardy-tvr`.
+
+---
+
 ## 5. Technical Requirements & Dependencies
 
 ### Backend (Rust / Axum)
