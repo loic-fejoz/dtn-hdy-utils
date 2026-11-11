@@ -39,7 +39,9 @@ jobs:
           ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
 
       - name: Install Protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -117,7 +119,9 @@ jobs:
           ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
 
       - name: Install Protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -125,10 +129,9 @@ jobs:
           components: rustfmt, clippy
 
       - name: Install security scanners (gitleaks, cargo-audit, cargo-deny)
-        run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gitleaks_8.24.0_linux_x64.tar.gz | sudo tar -xz -C /usr/local/bin gitleaks
-          curl -sSfL https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.2/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz | sudo tar -xz -C /usr/local/bin --strip-components=1 cargo-audit-x86_64-unknown-linux-gnu-v0.22.2/cargo-audit
-          curl -sSfL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin --strip-components=1 cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: gitleaks,cargo-audit,cargo-deny
 
       - name: Setup Node & pnpm
         uses: pnpm/action-setup@v4
@@ -164,13 +167,15 @@ jobs:
           ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
 
       - name: Install Protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Nightly Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        uses: taiki-e/install-action@cargo-fuzz
 
       - name: Run LTP Fuzz Smoke Test
         run: |
@@ -207,7 +212,9 @@ jobs:
           ref: '960832ab9e2f6e4f693e4cb7b48d1d7513fd7bec'
 
       - name: Install Protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
