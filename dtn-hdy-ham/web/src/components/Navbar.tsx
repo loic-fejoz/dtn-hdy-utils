@@ -66,7 +66,7 @@ export function Navbar({
             <div>
               <div class="flex items-center space-x-2">
                 <span class="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-                  Hardy BPA
+                  DTN HdyHam
                 </span>
                 <span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
                   Hamradio
