@@ -105,16 +105,12 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Linux x86_64 Musl Tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt-get update && sudo apt-get install -y --fix-missing musl-tools musl-dev
-
-      - name: Setup Zig
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: Setup Zig (Linux)
+        if: runner.os == 'Linux'
         uses: mlugg/setup-zig@v2
 
-      - name: Install cargo-zigbuild
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: Install cargo-zigbuild (Linux)
+        if: runner.os == 'Linux'
         uses: taiki-e/install-action@cargo-zigbuild
 
       - name: Setup Rust Toolchain (Target Specific)
@@ -135,22 +131,8 @@ jobs:
           name: ham-web-dist
           path: dtn-hdy-utils/dtn-hdy-ham/web/dist
 
-      - name: Build Binaries (Linux x86_64 musl)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: |
-          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-ham
-          cargo build --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
-          mkdir -p bin
-          cp target/${{ matrix.target }}/release/dtn-hdy-ham bin/
-          for b in dtnsend dtnprint dtnfiles dtntrigger dtnquery dtnping dtnforward dtnbib dtnbasket dtnbasket-cli hdy-stats; do
-            cp target/${{ matrix.target }}/release/$b bin/
-          done
-        working-directory: dtn-hdy-utils
-        env:
-          RUSTFLAGS: "-C target-feature=+crt-static"
-
-      - name: Build Binaries (Linux aarch64 musl)
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: Build Binaries (Linux musl)
+        if: runner.os == 'Linux'
         run: |
           cargo zigbuild --release --target ${{ matrix.target }} -p dtn-hdy-ham
           cargo zigbuild --release --target ${{ matrix.target }} -p dtn-hdy-utils --bin dtnsend --bin dtnprint --bin dtnfiles --bin dtntrigger --bin dtnquery --bin dtnping --bin dtnforward --bin dtnbib --bin dtnbasket --bin dtnbasket-cli --bin hdy-stats
