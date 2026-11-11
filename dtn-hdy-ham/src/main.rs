@@ -18,7 +18,7 @@ struct Cli {
     #[arg(short, long, value_name = "FILE")]
     config: Option<PathBuf>,
 
-    /// Override local node EID (e.g. 'dtn://n0call.ampr.org/' or 'ipn:1.0')
+    /// Override local node EID (e.g. 'dtn://n0call/' or 'ipn:1.0')
     #[arg(short, long)]
     node_id: Option<String>,
 
@@ -51,8 +51,8 @@ enum Commands {
 }
 
 const EXAMPLE_CONFIG: &str = r#"# dtn-hdy-ham: Hamradio DTN BPv7 Node Configuration
-# EID format can be DTN scheme (e.g. dtn://CALLSIGN.ampr.org/) or IPN scheme (e.g. ipn:NODE.0)
-node-id: "dtn://n0call.ampr.org/"
+# EID format can be DTN scheme (e.g. dtn://CALLSIGN/) or IPN scheme (e.g. ipn:NODE.0)
+node-id: "dtn://n0call/"
 
 # Storage settings (bundle storage directory & embedded SQLite database)
 storage:

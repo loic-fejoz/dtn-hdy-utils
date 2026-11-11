@@ -2,6 +2,7 @@
 /sbom.json
 /.zed
 agy-landrun.sh
+agy-nono.sh
 __pycache__/
 *.pyc
 

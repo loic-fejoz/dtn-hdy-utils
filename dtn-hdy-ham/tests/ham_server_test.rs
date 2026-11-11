@@ -7,7 +7,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn test_ham_server_in_memory_startup() {
     let mut config = HamConfig {
-        node_id: "dtn://f4jxq.ampr.org/".to_string(),
+        node_id: "dtn://f4jxq/".to_string(),
         storage: dtn_hdy_ham::config::StorageConfig {
             in_memory: true,
             ..Default::default()
@@ -76,7 +76,7 @@ async fn test_ham_server_in_memory_startup() {
 #[test]
 fn test_ham_config_yaml_parsing() {
     let yaml = r#"
-node-id: "dtn://f4jxq.ampr.org/"
+node-id: "dtn://f4jxq/"
 admin-endpoints:
   - "ipn:1.0"
 storage:
@@ -116,7 +116,7 @@ rfc9171-validity:
     std::fs::write(&file_path, yaml).unwrap();
 
     let config = HamConfig::load(Some(&file_path)).expect("YAML config should parse");
-    assert_eq!(config.node_id, "dtn://f4jxq.ampr.org/");
+    assert_eq!(config.node_id, "dtn://f4jxq/");
     assert_eq!(config.admin_endpoints, vec!["ipn:1.0"]);
     assert_eq!(config.clas.len(), 3);
     assert_eq!(config.routes.len(), 1);

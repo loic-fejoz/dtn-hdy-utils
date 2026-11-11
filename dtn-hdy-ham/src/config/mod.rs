@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 fn default_node_id() -> String {
-    "dtn://n0call.ampr.org/".to_string()
+    "dtn://n0call/".to_string()
 }
 
 fn default_grpc_addr() -> SocketAddr {
@@ -23,7 +23,7 @@ pub struct HamConfig {
     #[serde(default)]
     pub callsign: Option<String>,
 
-    /// Administrative Node EID (e.g. `dtn://f4jxq.ampr.org/` or `ipn:1.0`).
+    /// Administrative Node EID (e.g. `dtn://f4jxq/` or `ipn:1.0`).
     #[serde(default = "default_node_id")]
     pub node_id: String,
 

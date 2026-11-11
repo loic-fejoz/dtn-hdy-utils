@@ -15,8 +15,8 @@
 callsign = "N0CALL"
 
 # Primary Administrative Node EID (RFC 9171)
-# Typically dtn://<callsign>.ampr.org/ or ipn:<node_number>.0
-node-id = "dtn://n0call.ampr.org/"
+# Typically dtn://<callsign>/ or ipn:<node_number>.0
+node-id = "dtn://n0call/"
 
 # Additional admin EID endpoints this node accepts bundles for
 admin-endpoints = []
